@@ -43,7 +43,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .antigravity import _antigravity_env
+from .netutil import proxied_env as _antigravity_env
 from .base import (
     RuntimeAdapter,
     SubagentHandle,

@@ -95,11 +95,13 @@
 | `zcode` | `glm-5.2` / `glm-5.2-fast` | 需 zcode 已登录 |
 | `grok` | `grok-4.5` | **逆向/其它模型拒答的敏感任务**；美国服务必须走代理（hub 自动注入，无需配置）；xAI 订阅额度不按量计费 |
 | `qwen`（opencode 通道） | `qwen/qwen3.7-plus` | 可用 |
+| `zen-v4f`（opencode 通道） | `zen-v4f/deepseek-v4-flash-free` | **Zen 号池 DeepSeek V4 Flash（免费 204k），用量巨大的批量重活走这**；独占一组只此一个模型 |
+| `qwen2api`（opencode 通道） | `qwen/qwen3.8-max-preview`（含 `-thinking`） | ⚠️ 半复活：简单对话可用（curl 实测通），但带 system prompt/工具定义的 agentic 请求会被上游 WAF 风控拦截（"网关已按当前策略重试/切换账号但仍失败"）——spawn 派活暂不可用， alias `qwen3.8max` 首选仍是 qoder |
 
 **红线：**
 - `gpt-5.6-*` 必须配 `runtime="codex"`，配 `opencode` 会挂。
 - `gemini-3.6-flash-*` 必须配 `runtime="antigravity"`。
-- `opencode-go/*`、`opencode/*`、`qwen/*` 配 `runtime="opencode"`。
+- `opencode-go/*`、`opencode/*`、`qwen/*`、`zen-v4f/*`、`zen-free/*` 配 `runtime="opencode"`。
 - `botcf-claude/*`、`botcf-claude-stable/*` 配 `runtime="claude"`（Claude Code CLI + Anthropic SDK，baseURL `https://botcf.com`，**不要带 `/v1`**）。
 - `qoder/*` 配 `runtime="qoder"`（qoderclicn）。
 - `grok-4.5` 配 `runtime="grok"`（Grok Build CLI，二进制在 `~/.grok/bin/grok.exe`）。
@@ -110,12 +112,13 @@
 ## 5. 派工策略（约定）
 
 1. 杂活/批量 → `opencode-go/deepseek-v4-flash`
-2. 难活/质量敏感 → `opencode-go/glm-5.2`
-3. 复杂推理/兜底 → `botcf-claude/claude-opus-5`（claude）或 `gpt-5.6-sol`（codex）
-4. 多模态/图相关/要快 → `gemini-3.6-flash-medium`（antigravity）
-5. 极小任务才用 free 档。
-6. 逆向工程/其它模型拒答的敏感任务 → `grok/grok-4.5`。
-7. 模型超时或服务端错误时 hub 会自动兜底到 `codex/gpt-5.6-sol`，不用自己重试。
+2. **大批量/重活且想零成本 → `zen-v4f/deepseek-v4-flash-free`**（Zen 号池免费 204k，opencode 通道，别名 `zen-v4f`）
+3. 难活/质量敏感 → `opencode-go/glm-5.2`
+4. 复杂推理/兜底 → `botcf-claude/claude-opus-5`（claude）或 `gpt-5.6-sol`（codex）
+5. 多模态/图相关/要快 → `gemini-3.6-flash-medium`（antigravity）
+6. 极小任务才用 free 档。
+7. 逆向工程/其它模型拒答的敏感任务 → `grok/grok-4.5`。
+8. 模型超时或服务端错误时 hub 会自动兜底到 `codex/gpt-5.6-sol`，不用自己重试。
 
 ## 6. 出错自查清单
 

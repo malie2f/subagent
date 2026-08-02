@@ -117,8 +117,10 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
   - ⚠️ 免费/福利类 key 只派特小任务，不要派长任务/批量任务；挂了不要 fallback 重复试，直接换主力分组
   - ⚠️ `deepseek-fuli` 福利 key 独立分组已于 2026-08-01 晚失效（401 invalid key），分组已从 opencode.json 移除；拿到新福利 key 后可重新添加（配置备份见 `~/.config/opencode/opencode.json.bak.20260801145846`）
 - 日常杂活、批量任务：`opencode` + `opencode-go/deepseek-v4-flash`（便宜快；⚠️ 走代理会 403，需直连）或 `deepseek/deepseek-v4-flash`（官方 key 直连，稳定）
+- 大批量重活想零成本：`opencode` + `zen-v4f/deepseek-v4-flash-free`（Zen 号池 DeepSeek V4 Flash GA free 204k，独占一组；别名 `zen-v4f`；2026-08-02 实测 spawn 全通）
 - 复杂重构、兜底：`codex` + `gpt-5.6-sol` 或 `codebuddy` + `glm-5.2`
 - Claude 系任务：`claude` + `botcf-claude/claude-opus-5`（超时自动切 stable）
+- ⚠️ qwen2api（`qwen/qwen3.8-max-preview`，免费代理）半复活：简单对话通，但带 system prompt/工具定义的 agentic 请求被上游 WAF 风控拦截，spawn 派活暂不可用；alias `qwen3.8max` 首选仍是 `qoder/Qwen3.8-Max-Preview`，qwen 通道只做候选
 - 多模态/搜索/语音/视频：直接用 `mmx_*` 工具
 - 看各模型 token / cost 用量：`usage_stats`（按模型+按天聚合，数据源是 transcript 的 usage 事件；opencode/grok/codex 有数据，其余 runtime 计入 without_usage）；dashboard 也有 `GET /api/usage`
 - 逆向工程 / 其它模型拒答的敏感任务：`grok` + `grok-4.5`（Grok Build，xAI 订阅额度、不按量计费；美国服务必须走代理——自动复用 antigravity 的代理探测，当前 127.0.0.1:17891；支持 `reasoning_effort=low/medium/high`，默认 high，小任务传 low 省额度；输出里的 `total_cost_usd` 只是刊例价估算，不是真实扣费）

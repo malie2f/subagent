@@ -1,7 +1,8 @@
 # mcp-hub 调用规范（给所有派工 agent 看）
 
-> 版本：2026-07-26 · 适用于 mcp-hub SSE 模式
+> 版本：2026-08-02 · 适用于 mcp-hub SSE 模式
 > 谁再报 `-32602`（Invalid params），先对照本文档自查，90% 是参数格式问题，不是 hub 挂了。
+> 工具全清单和模型选择经验看 [MCP_USAGE.md](./MCP_USAGE.md)；本文档只讲调用规范。
 
 ---
 
@@ -59,7 +60,11 @@
 
 - 只用于直调适配器（当前只有 `minimax` 在线）。调 CLI 类模型请用 `spawn_subagent`。
 
-## 4. runtime ↔ model 配对表（2026-07-26 实测存活）
+### usage_stats —— token / cost 用量聚合
+
+- 无参数，返回 total / by_model / by_day 三组聚合；opencode/grok/codex/claude/zcode 有数据，其余 runtime 计入 tasks_without_usage。
+
+## 4. runtime ↔ model 配对表（2026-08-02 实测存活）
 
 | runtime | 可用 model | 分工 |
 |---|---|---|
@@ -88,6 +93,7 @@
 | `claude` | `sonnet` / `opus` / `haiku` / `claude-opus-4-6` | 官方 Anthropic API key |
 | `kimi` | `kimi-code/kimi-for-coding` | 中文/长文本 |
 | `zcode` | `glm-5.2` / `glm-5.2-fast` | 需 zcode 已登录 |
+| `grok` | `grok-4.5` | **逆向/其它模型拒答的敏感任务**；美国服务必须走代理（hub 自动注入，无需配置）；xAI 订阅额度不按量计费 |
 | `qwen`（opencode 通道） | `qwen/qwen3.7-plus` | 可用 |
 
 **红线：**
@@ -96,6 +102,7 @@
 - `opencode-go/*`、`opencode/*`、`qwen/*` 配 `runtime="opencode"`。
 - `botcf-claude/*`、`botcf-claude-stable/*` 配 `runtime="claude"`（Claude Code CLI + Anthropic SDK，baseURL `https://botcf.com`，**不要带 `/v1`**）。
 - `qoder/*` 配 `runtime="qoder"`（qoderclicn）。
+- `grok-4.5` 配 `runtime="grok"`（Grok Build CLI，二进制在 `~/.grok/bin/grok.exe`）。
 - `claude` runtime 支持官方 Anthropic API key，也支持 botcf。
 - mcp-hub 已为每个 Claude Code 子 agent 隔离 `~/.claude/settings.json`，避免你本地其他 Claude Code 配置（如 DeepSeek）覆盖当前 key。
 - **死掉的通道（已拉黑，禁止派发）**：`botcf/deepseek-v4-flash`（空包）、`botcf/deepseek-v4-pro`（空包）、`botcf/mimo-v2.5-pro`（空包）、`botcf/饿了么5.2`、`botcf/寄了么5.2`、`botcf/克劳德欧帕兹五点二`、`zhipuai/glm-5.2`（服务端 500）、`minimax/MiniMax-M3` 直连（空响应；要走 `opencode-go/minimax-m3`）。
@@ -107,7 +114,8 @@
 3. 复杂推理/兜底 → `botcf-claude/claude-opus-5`（claude）或 `gpt-5.6-sol`（codex）
 4. 多模态/图相关/要快 → `gemini-3.6-flash-medium`（antigravity）
 5. 极小任务才用 free 档。
-6. 模型超时或服务端错误时 hub 会自动兜底到 `codex/gpt-5.6-sol`，不用自己重试。
+6. 逆向工程/其它模型拒答的敏感任务 → `grok/grok-4.5`。
+7. 模型超时或服务端错误时 hub 会自动兜底到 `codex/gpt-5.6-sol`，不用自己重试。
 
 ## 6. 出错自查清单
 
@@ -115,7 +123,7 @@
 |---|---|
 | `-32602` | 参数名/类型不对；`_json` 参数是不是传了对象；多传了 schema 外字段 |
 | spawn 失败、模型不认识 | runtime 和 model 没配套（看第 4 节） |
-| 连不上 SSE | hub 没起：`curl http://127.0.0.1:8765/sse` 应返回 `event: endpoint` |
+| 连不上 SSE | hub 没起：`mcp-hub-cli service status` 看状态，`mcp-hub-cli service start` 拉起；`curl http://127.0.0.1:8765/sse` 应返回 `event: endpoint` |
 | 任务没人跑 | cluster-only worker 没起；dashboard 集群页看 worker 状态 |
 | 想知道谁在跑 | dashboard `http://127.0.0.1:8766` → 子 Agent / 任务 tab |
 

@@ -4,15 +4,25 @@ Antigravity CLI（官方仓库 google-antigravity/antigravity-cli，命令名 ag
 是 Google 在 2026 I/O 发布的独立命令行工具。它通过 `--print` 支持非交互单次任务。
 
 注意调用格式：
-  antigravity --print "<task>" --add-dir <dir> --model <model> --dangerously-skip-permissions
+  antigravity --print "<task>" --add-dir <dir> --model <model> --output-format json --dangerously-skip-permissions
 
-解析基于文本输出：Antigravity CLI 没有结构化事件流，但会在回复里用 markdown 链接
-（如 `[existing.txt](file:///C:/.../existing.txt)`）引用它改动过的文件。
+解析策略（wait）：
+  - `--output-format json` 下 stdout 是整段 JSON，形如：
+    {"conversation_id":..., "status":"SUCCESS", "response":"<回答>", "num_turns":1,
+     "usage":{"input_tokens":..., "output_tokens":..., "thinking_tokens":...,
+              "cache_read_tokens":..., "total_tokens":...}}
+    从中提取回答文本（response，兼容 text/result 别名）和 usage 事件
+    （thinking_tokens→reasoning、cache_read_tokens→cache.read、无 cost 源填 0.0）。
+  - 解析失败（老 CLI 版本不支持该 flag、异常输出等）回退到老的纯文本提取路径，
+    不产生 usage 事件但也不崩。
+  - 两种模式下都还会在回复文本里找 markdown 文件链接
+    （如 `[existing.txt](file:///C:/.../existing.txt)`）提取 artifacts。
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -33,8 +43,10 @@ from .base import (
 )
 from .netutil import proxied_env as _antigravity_env
 
-# 最低版本要求：v1.1.0 起 `--print` 和 `--dangerously-skip-permissions` 已稳定
-MIN_VERSION = (1, 1, 0)
+# 最低版本要求：v1.1.9 是首个实测确认支持 `--output-format json` 的版本
+# （该 flag 的确切引入版本未知，保守取实测版本；wait() 对纯文本输出仍有回退，
+# 但老 CLI 可能直接拒绝未知 flag，所以版本守卫要拦住）。
+MIN_VERSION = (1, 1, 9)
 
 # 认证状态探测缓存 TTL（秒）
 _AUTH_TTL = 60.0
@@ -133,6 +145,8 @@ class AntigravityAdapter(RuntimeAdapter):
         cmd += ["--add-dir", str(Path(workdir).resolve())]
         if model:
             cmd += ["--model", model]
+        # 整段 JSON 输出（含 usage），wait() 优先按 JSON 解析、失败回退文本路径
+        cmd += ["--output-format", "json"]
         cmd.append("--dangerously-skip-permissions")
 
         # stdout/stderr 直接重定向到日志文件（不走 PIPE）。
@@ -187,17 +201,24 @@ class AntigravityAdapter(RuntimeAdapter):
         stdout, stderr = await wait_and_collect(handle, proc, timeout_sec)
         clean_stdout = _clean_ansi(stdout)
         clean_stderr = _clean_ansi(stderr)
+        exit_code = proc.returncode or 0
 
-        artifacts = _extract_artifacts(clean_stdout)
-        summary = _extract_summary(clean_stdout)
-        transcript = _build_transcript(
-            prompt=handle.prompt,
-            stdout=clean_stdout,
-            stderr=clean_stderr,
-            artifacts=artifacts,
-            summary=summary,
-            exit_code=proc.returncode or 0,
-        )
+        # 优先按 `--output-format json` 的整段 JSON 解析（含 usage）；
+        # 解析失败（老 CLI / 异常输出）回退到老的纯文本提取路径，不崩。
+        parsed = _parse_json_output(clean_stdout, clean_stderr, exit_code)
+        if parsed is not None:
+            transcript, summary, artifacts = parsed
+        else:
+            artifacts = _extract_artifacts(clean_stdout)
+            summary = _extract_summary(clean_stdout)
+            transcript = _build_transcript(
+                prompt=handle.prompt,
+                stdout=clean_stdout,
+                stderr=clean_stderr,
+                artifacts=artifacts,
+                summary=summary,
+                exit_code=exit_code,
+            )
         if handle.output_file:
             write_transcript(handle, handle.prompt, transcript)
 
@@ -205,7 +226,7 @@ class AntigravityAdapter(RuntimeAdapter):
             runtime=handle.runtime,
             model=handle.model,
             task_id=handle.task_id,
-            exit_code=proc.returncode or 0,
+            exit_code=exit_code,
             stdout=clean_stdout,
             stderr=clean_stderr,
             duration_sec=time.time() - started,
@@ -308,6 +329,111 @@ def _extract_summary(stdout: str) -> str:
     return s[:2000] if s else ""
 
 
+def _extract_json_obj(stdout: str) -> dict[str, Any] | None:
+    """`--output-format json` 下 stdout 应该是一整个 JSON 对象；
+    容错取第一个 '{' 到最后 '}'（允许前后有噪声行）。"""
+    start = stdout.find("{")
+    end = stdout.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        obj = json.loads(stdout[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+# usage 字段映射（以 v1.1.9 实测输出为准）：
+#   input_tokens→input, output_tokens→output, thinking_tokens→reasoning,
+#   total_tokens→total（缺失时 input+output 兜底）, cache_read_tokens→cache.read
+#   无 cache write / cost 源 → cache.write=0, cost=0.0
+_USAGE_MAP = (
+    ("input_tokens", "input"),
+    ("output_tokens", "output"),
+    ("thinking_tokens", "reasoning"),
+    ("total_tokens", "total"),
+)
+
+
+def _map_usage(usage: dict[str, Any]) -> dict[str, Any] | None:
+    """把 CLI 的 usage 对象映射成标准 usage 事件；没有任何 token 字段返回 None。"""
+    tokens: dict[str, Any] = {}
+    for src, dst in _USAGE_MAP:
+        v = usage.get(src)
+        if isinstance(v, (int, float)):
+            tokens[dst] = int(v)
+    if not tokens:
+        return None
+    if "total" not in tokens:
+        tokens["total"] = tokens.get("input", 0) + tokens.get("output", 0)
+    cache_read = usage.get("cache_read_tokens")
+    tokens["cache"] = {
+        "read": int(cache_read) if isinstance(cache_read, (int, float)) else 0,
+        "write": 0,
+    }
+    return {"type": "usage", "tokens": tokens, "cost": 0.0}
+
+
+def _parse_json_output(
+    stdout: str,
+    stderr: str,
+    exit_code: int,
+) -> tuple[list[dict[str, Any]], str, list[str]] | None:
+    """按 `--output-format json` 的整段 JSON 解析 stdout。
+
+    返回 (events, summary, artifacts)；stdout 不是合法 JSON、或 JSON 里既
+    没有回答文本也没有 usage（可能是别的噪声 JSON）时返回 None，由调用方
+    回退到老的纯文本提取路径。
+
+    事件结构与其它 JSON 输出型 adapter 一致：
+    file_change / turn:assistant / usage / final / error。
+    """
+    obj = _extract_json_obj(stdout)
+    if obj is None:
+        return None
+
+    response = ""
+    for key in ("response", "text", "result"):
+        v = obj.get(key)
+        if isinstance(v, str) and v.strip():
+            response = v
+            break
+    summary = response.strip()[:2000] if response.strip() else ""
+
+    usage_ev = None
+    usage = obj.get("usage")
+    if isinstance(usage, dict):
+        usage_ev = _map_usage(usage)
+
+    if not summary and usage_ev is None:
+        return None
+
+    artifacts = _extract_artifacts(response)
+    events: list[dict[str, Any]] = []
+    events.extend(_file_change_events(response))
+
+    if summary:
+        events.append({"type": "turn", "role": "assistant", "content": summary})
+
+    if usage_ev is not None:
+        events.append(usage_ev)
+
+    if summary:
+        events.append({
+            "type": "final",
+            "content": summary,
+            "stop_reason": "ok" if exit_code == 0 else "error",
+        })
+
+    status = obj.get("status")
+    if exit_code != 0 and stderr:
+        events.append({"type": "error", "message": stderr[-2000:]})
+    elif isinstance(status, str) and status and status.upper() != "SUCCESS":
+        events.append({"type": "error", "message": f"antigravity status={status}"})
+
+    return events, summary, artifacts
+
+
 _FILE_LINK_RE = re.compile(
     r"(?P<verb>created|appended|edited|updated|wrote|deleted|modified)?\s*(?:file\s+)?\[(?P<name>[^\]]*)\]\((?P<uri>file://[^)]+)\)",
     re.IGNORECASE,
@@ -345,22 +471,16 @@ _ACTION_MAP = {
 }
 
 
-def _build_transcript(
-    prompt: str,
-    stdout: str,
-    stderr: str,
-    artifacts: list[str],
-    summary: str,
-    exit_code: int,
-) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
+def _file_change_events(text: str) -> list[dict[str, Any]]:
+    """从文本里的 markdown 文件链接提取 file_change 事件。
 
+    同路径保留最强动作：modify > create > delete。
+    """
     file_actions: dict[str, str] = {}
-    for m in _FILE_LINK_RE.finditer(stdout):
+    for m in _FILE_LINK_RE.finditer(text):
         verb = (m.group("verb") or "").lower()
         path = _file_uri_to_path(m.group("uri"))
         action = _ACTION_MAP.get(verb, "modify")
-        # 同路径保留最强动作：modify > create > delete
         if path == "":
             continue
         current = file_actions.get(path)
@@ -373,12 +493,23 @@ def _build_transcript(
         elif action == "delete" and current not in ("modify", "create"):
             file_actions[path] = "delete"
 
-    for path, action in file_actions.items():
-        events.append({
-            "type": "file_change",
-            "path": path,
-            "action": action,
-        })
+    return [
+        {"type": "file_change", "path": path, "action": action}
+        for path, action in file_actions.items()
+    ]
+
+
+def _build_transcript(
+    prompt: str,
+    stdout: str,
+    stderr: str,
+    artifacts: list[str],
+    summary: str,
+    exit_code: int,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+
+    events.extend(_file_change_events(stdout))
 
     if summary:
         events.append({
@@ -406,25 +537,7 @@ def parse_live_log(stdout: str, stderr: str = "") -> list[dict[str, Any]]:
     clean = _clean_ansi(stdout)
     events: list[dict[str, Any]] = []
 
-    file_actions: dict[str, str] = {}
-    for m in _FILE_LINK_RE.finditer(clean):
-        verb = (m.group("verb") or "").lower()
-        path = _file_uri_to_path(m.group("uri"))
-        action = _ACTION_MAP.get(verb, "modify")
-        if path == "":
-            continue
-        current = file_actions.get(path)
-        if current == "modify":
-            continue
-        if action == "modify":
-            file_actions[path] = "modify"
-        elif action == "create" and current != "modify":
-            file_actions[path] = "create"
-        elif action == "delete" and current not in ("modify", "create"):
-            file_actions[path] = "delete"
-
-    for path, action in file_actions.items():
-        events.append({"type": "file_change", "path": path, "action": action})
+    events.extend(_file_change_events(clean))
 
     lines = [ln for ln in clean.splitlines() if ln.strip()]
     tail = "\n".join(lines[-30:])

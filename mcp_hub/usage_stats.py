@@ -10,8 +10,11 @@ usage 事件覆盖情况（2026-08-02 时点）：
   - opencode ✅（聚合所有 step_finish 后单次发出，tokens 含 cache read/write + cost）
   - grok     ✅（单 JSON 输出映射，cost = total_cost_usd 刊例估算价）
   - codex    ✅（turn.completed 的 usage 映射；多 turn 会话会多次发出，按出现求和）
-  - claude / kimi / codebuddy / qoder / zcode / antigravity ✗（adapter 未解析 usage，
-    这些任务计入 tasks_without_usage，不编造数据）
+  - claude   ✅ / zcode ✅（2026-08-02 补）
+  - kimi ✗（CLI 无任何 usage 输出路径，等 CLI 升级）
+  - codebuddy / qoder ✗（text 模式无数据源；改 spawn 加 --output-format json 可解，未做）
+  - antigravity ✗（text 模式无数据源；--output-format json 已实测可用，切换待做）
+  以上 ✗ 任务计入 tasks_without_usage，不编造数据。
 
 聚合口径：一个 transcript 文件内所有 usage 事件求和；按 (runtime, model) 和
 按天（started_at 本地日期）两个维度分组。

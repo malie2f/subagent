@@ -115,6 +115,11 @@ def create_app() -> "Flask":
         from_user = data.get("from_user", "用户")
         return jsonify(state.continue_subagent(task_id, message, from_user))
 
+    @app.route("/api/subagents/<task_id>/cancel", methods=["POST"])
+    def api_subagent_cancel(task_id: str):
+        """停止运行中的子 agent（按 registry 里的 pid 杀进程）。"""
+        return jsonify(state.cancel_subagent(task_id))
+
     @app.route("/api/cluster")
     def api_cluster():
         return jsonify(state.cluster())

@@ -420,10 +420,18 @@ def _parse_claude_stream_json(stdout: str) -> list[dict[str, Any]]:
       - {"type":"message_stop"}
       - {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"...","content":...}]}}
 
+    Claude Code CLI（2.x）实际还发这些外层包装事件（实测历史日志）：
+      - {"type":"assistant","message":{...,"usage":{"input_tokens":N,
+          "cache_creation_input_tokens":N,"cache_read_input_tokens":N,
+          "output_tokens":N,...}}}   —— 同一 message.id 流式重复推，usage 是累积快照
+      - {"type":"result","subtype":"success","usage":{同上, 整轮合计},
+          "total_cost_usd":0.006,...} —— 最终一轮一次，是 usage 的首选来源
+
     我们合并 delta → 完整 text / 完整 tool_use input，输出标准化事件：
       {type:"turn", role:"assistant"|"user", content:...}
       {type:"tool_call", name, id, args}
       {type:"tool_result", tool_use_id, content}
+      {type:"usage", tokens:{input/output/reasoning/total, cache:{read,write}}, cost}
       {type:"final", content, stop_reason}
     """
     events: list[dict[str, Any]] = []
@@ -432,6 +440,11 @@ def _parse_claude_stream_json(stdout: str) -> list[dict[str, Any]]:
     current_msg: dict[str, Any] | None = None  # {role, blocks: [...]}
     current_block: dict[str, Any] | None = None
     pending_tool_results: list[dict[str, Any]] = []
+    # usage：result 事件是整轮合计（首选）；assistant message.usage 按 message.id
+    # 去重留最后快照，仅在进程被杀、没有 result 时兜底求和
+    result_usage: dict[str, Any] | None = None
+    result_cost: float = 0.0
+    msg_usage: dict[str, dict[str, Any]] = {}  # message.id -> 最后一次 usage 快照
 
     for line in stdout.splitlines():
         line = line.strip()
@@ -543,10 +556,93 @@ def _parse_claude_stream_json(stdout: str) -> list[dict[str, Any]]:
                         "is_error": blk.get("is_error", False),
                     })
 
+        elif et == "assistant":
+            # Claude Code 外层包装事件：只取 message.usage 快照（内容走
+            # content_block_* 那套状态机）；同一 message.id 会重复推，后者覆盖前者
+            msg = ev.get("message")
+            if isinstance(msg, dict):
+                u = msg.get("usage")
+                mid = msg.get("id")
+                if isinstance(u, dict):
+                    msg_usage[str(mid) if mid else f"_anon_{len(msg_usage)}"] = u
+
+        elif et == "result":
+            # 整轮合计，最后一次出现为准（正常一轮就一个）
+            u = ev.get("usage")
+            result_usage = u if isinstance(u, dict) else {}
+            c = ev.get("total_cost_usd")
+            result_cost = float(c) if isinstance(c, (int, float)) else 0.0
+
     # 兜底：把 pending_tool_results 全加进去
     events.extend(pending_tool_results)
 
+    # usage：首选 result 的整轮合计；没有 result（进程被杀等）时按 message.id
+    # 去重后的 assistant 快照求和兜底（cost 只有 result 有，兜底为 0.0）
+    if result_usage is not None:
+        usage_ev = _claude_usage_event(result_usage, result_cost)
+    else:
+        usage_ev = _claude_usage_event(_sum_message_usage(msg_usage), 0.0)
+    if usage_ev is not None:
+        events.append(usage_ev)
+
     return events
+
+
+def _as_int(v: Any) -> int | None:
+    """数值 → int；非数值返回 None（不编造）。"""
+    return int(v) if isinstance(v, (int, float)) else None
+
+
+def _sum_message_usage(msg_usage: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """把按 message.id 去重后的 usage 快照合成一个合计 dict（字段名保持源格式）。"""
+    totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
+    found = False
+    for u in msg_usage.values():
+        for k in totals:
+            v = _as_int(u.get(k))
+            if v is not None:
+                totals[k] += v
+                found = True
+    return totals if found else {}
+
+
+def _claude_usage_event(usage: dict[str, Any], cost: float) -> dict[str, Any] | None:
+    """Claude Code 的 usage 对象 → 标准 usage 事件。源字段全缺时返回 None。
+
+    字段映射（Anthropic 口径：input_tokens 不含缓存读/写）：
+      input_tokens                → tokens.input
+      output_tokens               → tokens.output
+      cache_read_input_tokens     → tokens.cache.read
+      cache_creation_input_tokens → tokens.cache.write
+      （无源字段）                → tokens.total = input + output + cache.read + cache.write
+      （无源字段）                → tokens.reasoning = 0
+      result.total_cost_usd       → cost（只有 result 事件带）
+    """
+    if not usage:
+        return None
+    inp = _as_int(usage.get("input_tokens"))
+    out = _as_int(usage.get("output_tokens"))
+    cr = _as_int(usage.get("cache_read_input_tokens"))
+    cw = _as_int(usage.get("cache_creation_input_tokens"))
+    if inp is None and out is None and cr is None and cw is None:
+        return None
+    inp, out, cr, cw = inp or 0, out or 0, cr or 0, cw or 0
+    return {
+        "type": "usage",
+        "tokens": {
+            "input": inp,
+            "output": out,
+            "reasoning": 0,
+            "total": inp + out + cr + cw,
+            "cache": {"read": cr, "write": cw},
+        },
+        "cost": float(cost),
+    }
 
 
 def _build_transcript_from_text(

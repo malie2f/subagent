@@ -7,6 +7,8 @@ let currentTab = 'overview';
 let currentSubagent = null;
 let liveEventSource = null;  // 当前正在实时 tail 的 SSE
 let liveStreamTaskId = null; // 当前正在实时看的 task_id
+let liveAutoScroll = true;   // SSE 日志跟随滚动（用户上翻时自动暂停）
+let usageLastFetch = 0;      // 用量 tab 30s 节流（/api/usage 聚合有开销）
 
 // 封存会话显示开关
 let showArchivedSubagents = false;
@@ -105,6 +107,19 @@ function fmtBytes(b) {
   return (b / 1024 / 1024).toFixed(1) + ' MB';
 }
 
+function fmtTokens(n) {
+  if (!n) return '0';
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
+}
+
+function fmtCost(c) {
+  if (!c) return '$0';
+  return '$' + (c >= 1 ? c.toFixed(2) : c.toFixed(4));
+}
+
 function makeTaskTitle(fromModel, createdAt, payload) {
   // 生成用户可读的会话标题：使用者 + 时间 + 请求摘要
   const who = fromModel && fromModel !== 'unknown' ? fromModel : '用户';
@@ -127,7 +142,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     currentTab = btn.dataset.tab;
     document.getElementById('tab-' + currentTab).classList.remove('hidden');
-    refresh();  // 切 tab 立即刷一次
+    refresh(true);  // 切 tab 立即刷一次（强制，绕过 usage 30s 节流）
   });
 });
 
@@ -140,7 +155,7 @@ document.getElementById('auto-refresh').addEventListener('change', e => {
   else stopPoll();
 });
 
-document.getElementById('refresh-btn').addEventListener('click', refresh);
+document.getElementById('refresh-btn').addEventListener('click', () => refresh(true));
 
 // 封存会话开关
 document.getElementById('subagent-show-archived').addEventListener('change', e => {
@@ -162,7 +177,7 @@ function stopPoll() {
   pollTimer = null;
 }
 
-function refresh() {
+function refresh(force) {
   switch (currentTab) {
     case 'overview':  renderOverview(); break;
     case 'dispatch':  renderDispatch(); break;
@@ -170,6 +185,7 @@ function refresh() {
     case 'subagents': renderSubagents(); break;
     case 'cluster':   renderCluster(); break;
     case 'tasks':     renderTasks(); break;
+    case 'usage':     renderUsage(force === true); break;
   }
   document.getElementById('last-update').textContent = '更新于 ' + fmtTime(Date.now() / 1000);
 }
@@ -191,33 +207,84 @@ function stopLiveStream() {
   if (liveEventSource) {
     liveEventSource.close();
     liveEventSource = null;
-    liveStreamTaskId = null;
+  }
+  liveStreamTaskId = null;
+}
+
+/**
+ * 绑定日志面板的控制条（跟随滚动开关 / 清空）。
+ * 每次详情面板 innerHTML 重渲染后都要重绑一次。
+ */
+function bindLiveLogControls() {
+  const container = document.getElementById('live-log-container');
+  if (!container) return;
+  const pre = container.querySelector('pre');
+  const cb = document.getElementById('live-autoscroll');
+  const clearBtn = document.getElementById('live-clear');
+  if (cb) {
+    cb.checked = liveAutoScroll;
+    cb.addEventListener('change', () => {
+      liveAutoScroll = cb.checked;
+      if (liveAutoScroll && pre) pre.scrollTop = pre.scrollHeight;
+    });
+  }
+  if (clearBtn && pre) {
+    clearBtn.addEventListener('click', () => { pre.textContent = ''; });
+  }
+  if (pre) {
+    // 用户上翻 = 暂停跟随；滚回底部 = 恢复跟随
+    pre.addEventListener('scroll', () => {
+      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+      liveAutoScroll = atBottom;
+      const c = document.getElementById('live-autoscroll');
+      if (c) c.checked = atBottom;
+    });
   }
 }
 
-function startLiveStream(tid) {
+/**
+ * 实时日志 SSE。只有 running 任务才开连接：
+ * 已结束的任务静态日志已经在面板里，开着 SSE 只会白占一个服务端线程
+ * （后端 stream 是无限 tail + 心跳，永远不会自己结束）。
+ */
+function startLiveStream(tid, isRunning = true) {
   // 避免重复连接同一个 task
   if (liveStreamTaskId === tid && liveEventSource) return;
   stopLiveStream();
-  liveStreamTaskId = tid;
 
   const statusEl = document.getElementById('live-status');
   const container = document.getElementById('live-log-container');
   if (!statusEl || !container) return;
 
-  statusEl.textContent = '连接中...';
-  statusEl.style.color = '#7d8590';
+  if (!isRunning) {
+    statusEl.textContent = '■ 已结束（静态日志）';
+    statusEl.style.color = '#7d8590';
+    return;
+  }
+  liveStreamTaskId = tid;
+
+  statusEl.textContent = '○ 连接中...';
+  statusEl.style.color = '#d29922';
 
   const es = new EventSource(`/api/subagents/${encodeURIComponent(tid)}/stream`);
   liveEventSource = es;
 
+  // 详情面板可能整体重渲染，statusEl/pre 都会换成新元素，
+  // 所以回调里每次现查 DOM，别闭包引用旧元素（否则会往 detached 节点里 append）
   es.onopen = () => {
-    statusEl.textContent = '● 实时连接中';
-    statusEl.style.color = '#2ea043';
+    const el = document.getElementById('live-status');
+    if (el && liveStreamTaskId === tid) {
+      el.textContent = '● 已连接';
+      el.style.color = '#2ea043';
+    }
   };
   es.onerror = () => {
-    statusEl.textContent = '× 连接断开';
-    statusEl.style.color = '#f85149';
+    const el = document.getElementById('live-status');
+    // EventSource 默认会自动重连，不用手动 close
+    if (el && liveStreamTaskId === tid) {
+      el.textContent = '× 已断开，自动重连中…';
+      el.style.color = '#f85149';
+    }
   };
   es.onmessage = (e) => {
     let data;
@@ -227,17 +294,24 @@ function startLiveStream(tid) {
       return;
     }
     if (data.type === 'log') {
-      const pre = container.querySelector('pre');
+      const c = document.getElementById('live-log-container');
+      const pre = c && c.querySelector('pre');
       if (pre) {
         pre.textContent += data.content;
-        pre.scrollTop = pre.scrollHeight;
+        if (liveAutoScroll) pre.scrollTop = pre.scrollHeight;
       }
     } else if (data.type === 'meta') {
-      statusEl.title = data.path || '';
+      const el = document.getElementById('live-status');
+      if (el) el.title = data.path || '';
     } else if (data.type === 'error') {
-      statusEl.textContent = '错误: ' + (data.message || '');
-      statusEl.style.color = '#f85149';
+      const el = document.getElementById('live-status');
+      if (el) {
+        el.textContent = '错误: ' + (data.message || '');
+        el.style.color = '#f85149';
+      }
       es.close();
+      liveEventSource = null;
+      liveStreamTaskId = null;
     } else if (data.type === 'heartbeat') {
       // 心跳，什么都不做
     }
@@ -405,9 +479,21 @@ function renderTranscriptView(events, isRunning = false, durationSec = 0) {
       const role = ev.role || 'assistant';
       const cls = role === 'assistant' ? 'msg-assistant' : (role === 'reasoning' ? 'msg-reasoning' : 'msg-user');
       const icon = role === 'assistant' ? '🤖' : (role === 'reasoning' ? '💭' : '👤');
-      const body = role === 'assistant'
-        ? `<div class="msg-content md">${renderMarkdown(ev.content || '')}</div>`
-        : `<div class="msg-content">${escapeHtml(ev.content || '')}</div>`;
+      let body;
+      if (role === 'reasoning') {
+        // reasoning 往往很长，默认折叠，点开看全文
+        const content = ev.content || '';
+        body = `
+          <details class="reasoning-fold">
+            <summary>推理过程（${content.length} 字符，点击展开）</summary>
+            <div class="msg-content">${escapeHtml(content)}</div>
+          </details>
+        `;
+      } else if (role === 'assistant') {
+        body = `<div class="msg-content md">${renderMarkdown(ev.content || '')}</div>`;
+      } else {
+        body = `<div class="msg-content">${escapeHtml(ev.content || '')}</div>`;
+      }
       parts.push(`
         <div class="msg ${cls}">
           <div class="msg-role">${icon} ${escapeHtml(role)} ${ts}</div>
@@ -418,6 +504,16 @@ function renderTranscriptView(events, isRunning = false, durationSec = 0) {
       const name = ev.name || '?';
       const args = ev.args || {};
       const argsStr = typeof args === 'string' ? args : JSON.stringify(args, null, 2);
+      // 长参数默认折叠成一行摘要，点开看完整 JSON
+      const ARGS_INLINE_MAX = 300;
+      const argsHtml = argsStr.length > ARGS_INLINE_MAX
+        ? `
+          <details class="args-fold">
+            <summary>参数（${argsStr.length} 字符）: ${escapeHtml(argsStr.slice(0, 80).replace(/\s+/g, ' '))}…</summary>
+            <pre class="msg-args">${escapeHtml(argsStr)}</pre>
+          </details>
+        `
+        : `<pre class="msg-args">${escapeHtml(argsStr)}</pre>`;
       const resultPreview = ev.result_preview ? `
         <details class="tool-result-preview">
           <summary>结果预览</summary>
@@ -428,9 +524,18 @@ function renderTranscriptView(events, isRunning = false, durationSec = 0) {
       parts.push(`
         <div class="msg msg-tool">
           <div class="msg-role">🔧 工具调用 · ${escapeHtml(name)} ${status} ${ts}</div>
-          <pre class="msg-args">${escapeHtml(argsStr)}</pre>
+          ${argsHtml}
           ${resultPreview}
         </div>
+      `);
+    } else if (t === 'usage') {
+      // usage 聚合成一行小字，别糊一大坨 JSON
+      const tk = ev.tokens || {};
+      const cache = tk.cache || {};
+      const cachePart = cache.read ? ` · cache ${fmtTokens(cache.read)}` : '';
+      const costPart = ev.cost ? ` · cost ${fmtCost(ev.cost)}` : '';
+      parts.push(`
+        <div class="usage-line">📊 tokens in ${fmtTokens(tk.input)} / out ${fmtTokens(tk.output)}${tk.reasoning ? ' / reasoning ' + fmtTokens(tk.reasoning) : ''} / 共 ${fmtTokens(tk.total)}${cachePart}${costPart} ${ts}</div>
       `);
     } else if (t === 'tool_result') {
       const ok = ev.is_error ? 'msg-tool-result-err' : 'msg-tool-result';
@@ -550,15 +655,16 @@ async function renderSubagents() {
     <div class="subagent-item ${currentSubagent === s.task_id ? 'active' : ''} ${s.status === 'verifying' ? 'task-verify' : ''}" data-tid="${escapeHtml(s.task_id)}">
       <div class="row1">
         <span class="title" title="${escapeHtml(s.payload || '')}">${escapeHtml(makeTaskTitle(s.from_model, s.created_at, s.payload))}</span>
-        <span class="status">${escapeHtml(s.status || '-')}</span>
-        ${isRunning ? '<span class="running-badge">⏳ 工作中</span>' : ''}
+        <span class="task-status ${escapeHtml(s.status || 'unknown')}">${escapeHtml(s.status || '-')}</span>
         ${s.status === 'verifying' ? '<span class="verify-badge">⚠ 待验收</span>' : ''}
       </div>
       <div class="row2">
         <span class="tid">${escapeHtml(s.task_id)}</span>
         <span class="muted">${escapeHtml(s.claimed_by || s.topic || '-')}</span>
         ${s.for_model ? `<span class="model-badge" title="调用的模型">🧠 ${escapeHtml(s.for_model)}</span>${effortBadge(s.for_model, s.reasoning_effort)}` : ''}
-        <span class="muted">${fmtDuration(s.duration_sec)}</span>
+        ${isRunning
+          ? `<span class="elapsed-live" data-start="${s.claimed_at || s.created_at || 0}" title="已运行时长（每秒刷新）">⏱ ${fmtDuration(s.duration_sec)}</span>`
+          : `<span class="muted">${fmtDuration(s.duration_sec)}</span>`}
         <span class="muted">${fmtTime(s.claimed_at)}</span>
         ${s.last_activity ? `<span class="muted" title="最后活动时间">⏱ ${fmtTime(s.last_activity)}</span>` : ''}
         ${s.possibly_stuck ? '<span class="stuck-badge">⚠ 疑似卡死</span>' : ''}
@@ -584,6 +690,17 @@ async function renderSubagents() {
     if (!stillThere) {
       currentSubagent = null;
       stopLiveStream();
+    } else if (
+      liveStreamTaskId === currentSubagent &&
+      !['running', 'claimed', 'pending'].includes(stillThere.status)
+    ) {
+      // 盯着的任务刚结束：关掉 SSE（后端流是无限 tail，不自己结束），状态置为已结束
+      stopLiveStream();
+      const statusEl = document.getElementById('live-status');
+      if (statusEl) {
+        statusEl.textContent = '■ 已结束';
+        statusEl.style.color = '#7d8590';
+      }
     }
   }
 }
@@ -683,6 +800,11 @@ async function showSubagentDetail(tid) {
         📡 实时日志
         <span id="live-status" class="muted" style="font-size: 11px">--</span>
       </h3>
+      <div class="live-controls">
+        <label><input type="checkbox" id="live-autoscroll" checked> 跟随滚动</label>
+        <button id="live-clear">清空</button>
+        <span class="muted">上翻暂停跟随，滚回底部恢复</span>
+      </div>
       ${isRunning ? `
         <div class="msg msg-running" style="margin-bottom: 8px">
           <div class="msg-role">⏳ 模型工作中<span class="working-dots"><span>.</span><span>.</span><span>.</span></span> <span class="ts">已运行 ${fmtDuration(s.duration_sec)}</span></div>
@@ -723,6 +845,12 @@ async function showSubagentDetail(tid) {
       </div>
       <div id="user-msg-status" class="muted" style="font-size: 12px; margin-bottom: 4px"></div>
       <div id="user-msg-list" style="font-size: 12px"></div>
+      ${isRunning ? `
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #30363d">
+          <button id="cancel-task-btn" class="danger-btn">⛔ 停止任务</button>
+          <span id="cancel-status" class="muted" style="font-size: 12px">强制杀掉子进程（不可恢复）</span>
+        </div>
+      ` : ''}
     </div>
 
     ${log && log.content ? `
@@ -769,8 +897,10 @@ async function showSubagentDetail(tid) {
     });
   });
 
-  // 启动实时日志 SSE
-  startLiveStream(tid);
+  // 实时日志：绑定控制条；running 任务自动接 SSE 跟随，已结束的只留静态日志
+  liveAutoScroll = true;
+  bindLiveLogControls();
+  startLiveStream(tid, isRunning);
 
   // 用户手动干预事件绑定
   const msgInput = document.getElementById('user-msg-input');
@@ -804,7 +934,9 @@ async function showSubagentDetail(tid) {
       msgStatus.style.color = '#f85149';
       return;
     }
-    msgStatus.textContent = '保存中...';
+    if (msgSaveBtn.disabled) return;  // 发送中，防重复点
+    msgSaveBtn.disabled = true;
+    msgStatus.textContent = '发送中...';
     msgStatus.style.color = '#7d8590';
     try {
       const r = await fetch(`/api/subagents/${tid}/message`, {
@@ -814,17 +946,19 @@ async function showSubagentDetail(tid) {
       });
       const data = await r.json();
       if (data.ok) {
-        msgStatus.textContent = '已保存';
+        msgStatus.textContent = '✓ 已发送并保存（续跑时会带上）';
         msgStatus.style.color = '#2ea043';
         msgInput.value = '';
         await loadUserMessages();
       } else {
-        msgStatus.textContent = '保存失败: ' + (data.error || '未知');
+        msgStatus.textContent = '发送失败: ' + (data.error || '未知');
         msgStatus.style.color = '#f85149';
       }
     } catch (e) {
       msgStatus.textContent = '异常: ' + e.message;
       msgStatus.style.color = '#f85149';
+    } finally {
+      msgSaveBtn.disabled = false;
     }
   }
 
@@ -834,7 +968,7 @@ async function showSubagentDetail(tid) {
       return;
     }
     msgContinueBtn.disabled = true;
-    msgStatus.textContent = '续跑中（spawn 新子 agent）...';
+    msgStatus.textContent = '续跑派发中（spawn 新子 agent）...';
     msgStatus.style.color = '#7d8590';
     try {
       const r = await fetch(`/api/subagents/${tid}/continue`, {
@@ -845,7 +979,7 @@ async function showSubagentDetail(tid) {
       const data = await r.json();
       if (data.ok) {
         const note = data.note ? `（${data.note}）` : '';
-        msgStatus.textContent = `已续跑，新任务: ${data.new_task_id} ${note}`;
+        msgStatus.textContent = `✓ 已派发续跑任务 ${data.new_task_id}，等待 agent 启动… ${note}（即将自动跳转）`;
         msgStatus.style.color = '#2ea043';
         msgInput.value = '';
         // 跳转到新任务
@@ -870,6 +1004,39 @@ async function showSubagentDetail(tid) {
     } finally {
       msgContinueBtn.disabled = false;
     }
+  }
+
+  // 停止按钮（仅 running 任务渲染了这个按钮）：confirm + 立即刷列表
+  const cancelBtn = document.getElementById('cancel-task-btn');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', async () => {
+      if (!confirm(`确定要停止任务 ${tid}？\n子进程会被强制杀掉，未完成的进度会丢，此操作不可恢复。`)) {
+        return;
+      }
+      const cStatus = document.getElementById('cancel-status');
+      cancelBtn.disabled = true;
+      cStatus.textContent = '停止中...';
+      cStatus.style.color = '#7d8590';
+      try {
+        const r = await fetch(`/api/subagents/${tid}/cancel`, { method: 'POST' });
+        const data = await r.json();
+        if (data.ok) {
+          cStatus.textContent = '✓ 已停止（子进程已杀）';
+          cStatus.style.color = '#2ea043';
+          stopLiveStream();
+          // 列表 2s 轮询也会更新，这里主动刷一次让状态立即反映
+          await renderSubagents();
+        } else {
+          cStatus.textContent = '停止失败: ' + (data.error || '未知');
+          cStatus.style.color = '#f85149';
+          cancelBtn.disabled = false;
+        }
+      } catch (e) {
+        cStatus.textContent = '异常: ' + e.message;
+        cStatus.style.color = '#f85149';
+        cancelBtn.disabled = false;
+      }
+    });
   }
 
   if (msgSaveBtn) msgSaveBtn.addEventListener('click', saveUserMessage);
@@ -943,6 +1110,75 @@ async function renderCluster() {
       </p>
     </div>
   `;
+}
+
+// ---------- Usage ----------
+
+async function renderUsage(force = false) {
+  // 30s 节流：/api/usage 要聚合全部 transcript，2s 轮询每次都拉太贵
+  const now = Date.now();
+  if (!force && usageLastFetch && now - usageLastFetch < 30000) return;
+  usageLastFetch = now;
+
+  const u = await fetchJson('/api/usage');
+  const total = u.total || { tokens: {}, cost: 0, tasks: 0 };
+  // by_day 的 key 是服务端本地日期；dashboard 跟 hub 同机，直接用浏览器本地日期对齐
+  const d = new Date();
+  const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = (u.by_day || {})[todayKey] || { tokens: {}, cost: 0, tasks: 0 };
+
+  document.getElementById('usage-stats').innerHTML = `
+    <div class="cluster-stat" style="margin-bottom: 8px">
+      <div class="stat"><div class="num">${fmtTokens((today.tokens || {}).total)}</div><div class="label">今日 token（${today.tasks || 0} 任务）</div></div>
+      <div class="stat"><div class="num" style="color: #d29922">${fmtCost(today.cost)}</div><div class="label">今日 cost</div></div>
+      <div class="stat"><div class="num">${fmtTokens((total.tokens || {}).total)}</div><div class="label">累计 token（${total.tasks || 0} 任务）</div></div>
+      <div class="stat"><div class="num" style="color: #d29922">${fmtCost(total.cost)}</div><div class="label">累计 cost</div></div>
+    </div>
+    <p class="muted" style="font-size: 11px">
+      每 30s 自动刷新 · 更新于 ${fmtTime(now / 1000)} ·
+      有 usage 数据的任务 ${u.tasks_with_usage || 0} / ${u.tasks_total || 0}
+      （${u.tasks_without_usage || 0} 个任务的 runtime 不上报 token，不计入）
+    </p>
+  `;
+
+  // 按模型排行：横向条形（纯 CSS）
+  const rows = u.by_model || [];
+  const maxTok = Math.max(1, ...rows.map(r => (r.tokens || {}).total || 0));
+  document.getElementById('usage-by-model').innerHTML = rows.map(r => {
+    const tk = r.tokens || {};
+    const cache = tk.cache || {};
+    const tok = tk.total || 0;
+    const pct = Math.max(tok > 0 ? 1 : 0, (tok / maxTok) * 100);
+    const tip = `input=${fmtTokens(tk.input)} output=${fmtTokens(tk.output)} reasoning=${fmtTokens(tk.reasoning)} cache_read=${fmtTokens(cache.read)}`;
+    return `
+      <div class="usage-bar-row" title="${escapeHtml(tip)}">
+        <span class="usage-name" title="${escapeHtml(r.model)}">${escapeHtml(r.model)}</span>
+        <div class="usage-bar-track"><div class="usage-bar-fill" style="width: ${pct.toFixed(1)}%"></div></div>
+        <span class="usage-val">${fmtTokens(tok)}</span>
+        <span class="usage-cost">${fmtCost(r.cost)}</span>
+        <span class="muted">${r.tasks} 任务</span>
+      </div>
+    `;
+  }).join('') || '<div class="muted">无数据</div>';
+
+  // 按天：最近 14 天，绿色小条形
+  const days = Object.entries(u.by_day || {})
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 14);
+  const maxDay = Math.max(1, ...days.map(([, v]) => (v.tokens || {}).total || 0));
+  document.getElementById('usage-by-day').innerHTML = days.map(([day, v]) => {
+    const tok = (v.tokens || {}).total || 0;
+    const pct = Math.max(tok > 0 ? 1 : 0, (tok / maxDay) * 100);
+    return `
+      <div class="usage-bar-row">
+        <span class="usage-name usage-day">${escapeHtml(day)}</span>
+        <div class="usage-bar-track"><div class="usage-bar-fill day" style="width: ${pct.toFixed(1)}%"></div></div>
+        <span class="usage-val">${fmtTokens(tok)}</span>
+        <span class="usage-cost">${fmtCost(v.cost)}</span>
+        <span class="muted">${v.tasks} 任务</span>
+      </div>
+    `;
+  }).join('') || '<div class="muted">无数据</div>';
 }
 
 // ---------- Dispatch tab ----------
@@ -1413,6 +1649,11 @@ async function toggleTaskDetail(tid) {
             📡 实时日志
             <span id="live-status" class="muted" style="font-size: 11px">--</span>
           </h3>
+          <div class="live-controls">
+            <label><input type="checkbox" id="live-autoscroll" checked> 跟随滚动</label>
+            <button id="live-clear">清空</button>
+            <span class="muted">上翻暂停跟随，滚回底部恢复</span>
+          </div>
           <div id="live-log-container">
             <pre class="log" style="max-height: 300px; background: #0a0d12; margin: 0">${log && log.content ? escapeHtml(log.content) : ''}</pre>
           </div>
@@ -1447,8 +1688,10 @@ async function toggleTaskDetail(tid) {
     `;
     detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-    // 启动实时日志 SSE
-    startLiveStream(tid);
+    // 实时日志：绑定控制条；running 任务自动接 SSE，已结束的只留静态日志
+    liveAutoScroll = true;
+    bindLiveLogControls();
+    startLiveStream(tid, ['running', 'claimed', 'pending'].includes(t.status));
   } catch (e) {
     detailEl.innerHTML = `<div class="muted" style="color: #f85149; padding: 12px">异常: ${escapeHtml(e.message)}</div>`;
   }
@@ -1524,6 +1767,15 @@ async function submitVerify(tid, passed) {
 }
 
 // ---------- 启动 ----------
+
+// running 任务的已运行时长：每秒就地更新，不用整表重渲染
+setInterval(() => {
+  const now = Date.now() / 1000;
+  document.querySelectorAll('.elapsed-live').forEach(el => {
+    const start = parseFloat(el.dataset.start || '0');
+    if (start > 0) el.textContent = '⏱ ' + fmtDuration(now - start);
+  });
+}, 1000);
 
 refresh();
 startPoll();

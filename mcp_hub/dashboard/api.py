@@ -836,6 +836,38 @@ class DashboardState:
             ),
         }
 
+    def cancel_subagent(self, task_id: str) -> dict[str, Any]:
+        """停止还在运行的子 agent：杀进程 + registry 标 cancelled。
+
+        进程句柄在 mcp-hub server 进程里，dashboard 是独立进程，只能按
+        registry 里的 pid 杀（跟 server 端 cancel_subagent 工具对孤儿句柄的
+        兜底路径一致）。queue 任务的 hub worker 随后会感知进程退出，
+        把任务标成 failed；registry-only 任务这里直接落 cancelled。
+        """
+        self._ensure()
+        registry = self._registry_load()
+        entry = (registry.get("subagents") or {}).get(task_id)
+        if not entry:
+            return {"ok": False, "error": f"registry 里找不到任务 {task_id}"}
+        status = entry.get("status") or ""
+        if status != "running":
+            return {"ok": False, "error": f"任务不在运行中（status={status}）"}
+
+        from mcp_hub.registry import _kill_pid, _pid_alive
+
+        pid = entry.get("pid")
+        killed = False
+        if isinstance(pid, int) and pid > 0:
+            killed = _kill_pid(pid) if _pid_alive(pid) else False
+            # 进程本来就死了也算达成"停止"目的，只落状态
+        registry = self._registry_load()  # 杀完重读，避免覆盖并发写
+        entry = (registry.get("subagents") or {}).get(task_id)
+        if entry is not None:
+            entry["status"] = "cancelled"
+            entry["finished_at"] = time.time()
+            self._registry_save(registry)
+        return {"ok": True, "task_id": task_id, "pid": pid, "killed": killed}
+
     def subagent_stream(self, task_id: str):
         """SSE 实时日志流：tail 子 agent 的 .log 文件。
 

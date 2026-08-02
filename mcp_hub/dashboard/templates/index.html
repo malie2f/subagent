@@ -24,6 +24,7 @@
   <button class="tab-btn" data-tab="subagents">子 Agent</button>
   <button class="tab-btn" data-tab="cluster">集群</button>
   <button class="tab-btn" data-tab="tasks">任务</button>
+  <button class="tab-btn" data-tab="usage">用量</button>
 </nav>
 
 <main>
@@ -190,6 +191,22 @@
     </div>
     <div id="task-list"></div>
     <div id="task-detail"></div>
+  </section>
+
+  <!-- 用量 -->
+  <section class="tab hidden" id="tab-usage">
+    <div class="card" style="margin-bottom: 16px">
+      <h2>总览</h2>
+      <div id="usage-stats"></div>
+    </div>
+    <div class="card" style="margin-bottom: 16px">
+      <h2>按模型 token 排行</h2>
+      <div id="usage-by-model"><div class="muted">加载中...</div></div>
+    </div>
+    <div class="card">
+      <h2>按天（最近 14 天）</h2>
+      <div id="usage-by-day"><div class="muted">加载中...</div></div>
+    </div>
   </section>
 </main>
 

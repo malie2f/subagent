@@ -250,6 +250,9 @@ class ZcodeAdapter(RuntimeAdapter):
             transcript.append({"type": "final", "content": summary})
         if exit_code != 0 and stderr.strip():
             transcript.append({"type": "error", "message": stderr[-2000:]})
+        usage_ev = _extract_usage(stdout)
+        if usage_ev is not None:
+            transcript.append(usage_ev)
 
         if handle.output_file:
             write_transcript(handle, handle.prompt, transcript)
@@ -279,3 +282,77 @@ class ZcodeAdapter(RuntimeAdapter):
             return True
         except Exception:  # noqa: BLE001
             return False
+
+
+# ---------- 输出解析 ----------
+
+def _as_int(v: Any) -> int | None:
+    """数值 → int；非数值返回 None（不编造）。"""
+    return int(v) if isinstance(v, (int, float)) else None
+
+
+def _extract_usage(stdout: str) -> dict[str, Any] | None:
+    """从 `zcode --prompt ... --json` 的输出里提取 usage，映射成标准 usage 事件。
+
+    zcode 0.15.x headless --json 输出是整段 JSON（实测 0.15.2）：
+      {"sessionId":"sess_...","response":"...",
+       "usage":{"source":"provider","modelRequestCount":1,
+                "inputTokens":7623,"outputTokens":2,"totalTokens":7625,
+                "cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0,...},
+       "projection":{...}}
+
+    字段映射：
+      inputTokens     → tokens.input
+      outputTokens    → tokens.output
+      reasoningTokens → tokens.reasoning
+      totalTokens     → tokens.total（缺失时 input+output 兜底，同 codex 口径）
+      cacheReadTokens → tokens.cache.read
+      cacheWriteTokens→ tokens.cache.write
+      （无 cost 源字段）→ cost = 0.0
+
+    容错：stdout 不是 JSON / 没有 usage dict / 字段全非数值 → 返回 None。
+    """
+    candidates: list[Any] = []
+    text = stdout.strip()
+    if text.startswith("{"):
+        try:
+            candidates.append(json.loads(text))
+        except json.JSONDecodeError:
+            pass
+    if not candidates:
+        # 整段解析失败时逐行找（容错：前后混了其它输出的情况）
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                candidates.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    for obj in candidates:
+        if not isinstance(obj, dict):
+            continue
+        usage = obj.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        inp = _as_int(usage.get("inputTokens"))
+        out = _as_int(usage.get("outputTokens"))
+        reas = _as_int(usage.get("reasoningTokens"))
+        tot = _as_int(usage.get("totalTokens"))
+        cr = _as_int(usage.get("cacheReadTokens"))
+        cw = _as_int(usage.get("cacheWriteTokens"))
+        if all(v is None for v in (inp, out, reas, tot, cr, cw)):
+            continue
+        inp, out = inp or 0, out or 0
+        return {
+            "type": "usage",
+            "tokens": {
+                "input": inp,
+                "output": out,
+                "reasoning": reas or 0,
+                "total": tot if tot is not None else inp + out,
+                "cache": {"read": cr or 0, "write": cw or 0},
+            },
+            "cost": 0.0,
+        }
+    return None

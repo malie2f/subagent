@@ -1,0 +1,8 @@
+{
+  "runtime": "opencode",
+  "model": "opencode/deepseek/deepseek-v4-flash",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【九轮·游戏设置数据面全挖】请以最高思考档位运行。产出报告 extracted/logs/settings_data_mining.md。\n\n背景：三角洲行动逆向。用户要 1:1 复刻游戏设置界面：按键设置、灵敏度设置、视频设置——需要 pak 里的官方数据：每个设置项的内部字段名、官方中文标签（LOC StringTable）、可选值列表、默认值、步进/范围。\n\n任务：\n1. **按键设置**：全部默认键位绑定（移动/开火/开镜/蹲/趴/歪头/跳跃/交互/技能键等）——找 Input/KeyBinding 相关表或 pak 内 DefaultInput.ini 类配置\n2. **灵敏度设置**：全部灵敏度项（视角/开镜逐倍率/陀螺仪等）的范围/步进/默认值；对照已实证 SystemSettingHD（MDV=1.33 范围 0~5、逐倍率 ADS_Sensitivty_Ratio_1~6，见 extracted/logs/pak_cdo_treasure.md）补齐其余项\n3. **视频/画面设置**：画质档位、视野 FOV 范围/默认、各选项的官方标签与可选值\n4. **设置界面结构**：标签页/子栏目结构（用户指出游戏是顶部栏+子栏目，无左侧栏）——找设置 UI 蓝图/配置表里的栏目定义\n5. 每项给：内部字段名/官方中文标签（LOC 原文）/可选值/默认值/表路径。产出 extracted/settings_data/ 机器可读 JSON + 报告。\n\n方法：先 ls extracted/dump_tables/ 盘点；grep extracted/asset_list_gamedir_20260731.txt 候选（Setting/Input/Keybind/Video/Graphics/Option）；LOC StringTable 在 DataTables/StringTables 下（STForDataTable 族已证实可读）。工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；找不到写未找到+检索记录。脚本写 tools/。"
+}

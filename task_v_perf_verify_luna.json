@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-luna",
+ "timeout_sec": 3600,
+ "wait": false,
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "reasoning_effort": "max",
+ "task": "【性能验证轮：技能预热实装的实测验收+报告回填】先读 docs/MISSION_20260801.md（第〇原则：根因/证据/机制）、extracted/logs/audit_perf.md（基线：warmup 25 programs→首次技能 35、max 35.4ms）、extracted/logs/impl_perf_warmup.md（现 4531B 骨架，你要回填成完整报告）。背景：性能实装路（任务 8d57427f0e21）死前已落地 range/src/data/skill_warmup_manifest.js(9.4K)+main.js+cascade_vfx.js+skills.js+bow_view.js 的预热接线，但从未验证；此后特效r4 又改过 cascade_vfx.js/skills.js（已验收），需先确认预热接线没被覆盖。\n\n任务（按序）：\n1. 接线核查：Grep 确认 skill_warmup_manifest 的 import/调用点仍在 main.js/cascade_vfx.js/skills.js/bow_view.js 里（audit_perf.md 记载过 renderer.compile 在 cascade_vfx.js:954 附近、prewarmSparkPool 调用点）；若被 r4 覆盖丢失，按死前实装的意图接回（编译预热+贴图 initTexture+火花池预热），不许新造机制。\n2. cd range && npm test 必须绿。\n3. 真实浏览器性能探针（不是合成基准！audit_perf.md 教训：luna 的 headless 合成基准 -16.6% 是假胜利）：vite 4564 + CDP 9564 起真页面，实测 renderer.info.programs 数量与帧时间：a) 进靶场 warmup 完成后 programs 数；b) 首次释放每个技能后的 programs 数（硬指标：after_skill == after_warmup，不得新增编译）；c) 首次技能帧 max 时间（硬指标：<20ms，基线 35.4ms）；d) 温雷（手雷预热投掷）帧时间。每个技能至少红狼三连/露娜侦察箭/赤枭火焰弩/冰爆/手雷。\n4. 回填 extracted/logs/impl_perf_warmup.md：接线清单、实测数据表（before=audit_perf 基线 / after=本轮实测）、帧或探针 JSON 证据路径、诚实标注未达标项。\n\n环境血泪：apply_patch 必须以 *** End Patch 结尾；rg 别用 -g glob（Windows 不展开），用 rg \"pattern\" 目录；删文件用 bash rm/python 不用 Remove-Item；端口 4173/4521/4522/8765 别碰，探针用完杀进程；改数值=改生成器禁手改 range/src/data/*.js（skill_warmup_manifest.js 是数据清单，若要改先确认它有生成器）；游戏目录只读。署名 kimi 验收。"
+}

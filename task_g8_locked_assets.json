@@ -1,0 +1,8 @@
+{
+  "runtime": "opencode",
+  "model": "opencode/deepseek/deepseek-v4-flash",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【八轮·锁定资产复核+新密钥 hunt】请以最高思考档位运行。产出报告 extracted/logs/locked_assets_round2.md。\n\n背景：三角洲行动逆向项目。早期记录：4 个 pak 挂载失败（chunk1/3/206/sensicommon203，S6+ 赛季更新密钥，报错 Can't find correct xor value），阻塞新干员特效与刀皮提取。近期（2026-07-31）已对游戏目录 121 个 pak 只读挂载成功（127 密钥，tools/AES_Keys_fixed.json），全量资产清单 extracted/asset_list_gamedir_20260731.txt 共 470,584 条。但「清单列出」≠「能解密导出」，需要逐项复核。\n\n复核清单（逐项验证能否真实导出，给导出命令+结果）：\n1. 新干员特效资产：蝶 C103 / 回响 C204 / 液氮 C405 / 赤枭 C501 的技能特效蓝图、贴图、材质（先前结论：在锁定 PAK 内）\n2. 刀皮：挽歌、坠星者（先前派单未竟）\n3. 怜悯、救赎（近战刀）攻击动画数据——用户报告攻击后播放意义不明动画，需确认游戏内原始动画资产到底有哪些、名字是什么\n4. 弹匣动画数据：换弹时弹匣是否有独立骨骼/track 动画（用户验收发现弹匣错位，需确认数据是否存在）\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <输出目录> --assets <清单文件>。清单文件从 asset_list_gamedir_20260731.txt 按关键词过滤生成。\n\n若确有 pak 仍解密失败：全网搜索最新赛季 AES 密钥（用户已授权联网找）——候选渠道：模之屋/wiki 社区、gildor 论坛（forums.gildor.org 三角洲行动专帖）、cs.rin.ru、GitHub 上的 dumper/key 仓库。找到新密钥就追加到 tools/AES_Keys_fixed.json 的副本（勿改原文件，存 tools/AES_Keys_round2.json）并实测。\n\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁止改动；结论分实证/推断/未找到三档，每条给证据；找不到写未找到+检索记录。脚本写到 tools/ 下。"
+}

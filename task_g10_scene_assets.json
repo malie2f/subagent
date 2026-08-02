@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【十轮·场景/容器资产逆向（靶场+容器建模储备）】请以最高思考档位运行。产出报告 extracted/logs/scene_container_assets.md。\n\n背景：三角洲行动逆向。用户长期需求：逆向游戏内场景资产为以后做准备（特别点名「有容器建模」），靶场场景还原也缺官方资产支撑。当前靶场场景是程序化搭建，用户不满意，想换真资产。\n\n任务：\n1. 资产清单 extracted/asset_list_gamedir_20260731.txt 里系统检索场景类资产：靶场/训练场（关键词候选：Range/Training/ShootingRange/Target/靶场）、集装箱/容器（Container/Crate/Box/集装箱）、掩体/障碍物（Cover/Barrier/Obstacle）、地面/墙面模块（Floor/Wall/Modular/Env）；\n2. 确认游戏靶场地图资产本体：找靶场的 map/level 资产（umap）与其引用的静态网格清单——能否 dump 出地图的物件布局（位置/旋转/缩放的物件摆放数据）是重点，这比单个 mesh 值钱得多；\n3. 导出优先级资产：靶场地图布局数据（若能 dump 出摆放表）> 靶场用靶子/假人 mesh > 集装箱/掩体 mesh 族（各档 2-3 个代表）> 地面墙面模块代表。导出走既定 GLB 管线（tools/app DFExtract export），落 extracted/scene_assets/；\n4. 材质/贴图随 mesh 一并导出（参考既有武器导出规约，贴图通道排布见 HANDOFF.md 硬知识）；\n5. 产出场景资产清单 JSON（extracted/scene_assets/manifest.json）：每个资产含路径/类型/尺寸/是否已导出 GLB。\n成功标准：靶场地图布局数据拿到（或给出未找到定案+原因）；至少一批容器/掩体/靶子 GLB 落盘且带贴图；manifest 完整。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump/list \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <dir> --assets <清单>；已有武器导出脚本 tools/ 下可参考。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改（你只产资产与数据，不接前端）；结论三档实证/推断/未找到+证据；脚本写 tools/。报告写中文（若你的 CLI 写入中文会丢失，用英文写，禁止写成问号乱码——九轮 luna 报告中文全丢成问号，务必先写一行中文测试，丢字就整份写英文）。"
+}

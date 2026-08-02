@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 7200,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【实装·干员特效域】请以最高思考档位（max）运行。产出报告 extracted/logs/impl_operator_vfx.md。\n\n背景：三角洲行动逆向项目，靶场前端在 range/（Three.js+Vite），用户已授权你实装。干员特效是用户立过多次专项的硬骨头：**现有特效是程序化的，必须换成游戏原版特效资产+原版机制数据**。\n\n数据（全部已逆向落盘，禁止编造）：\n- 特效资产：extracted/operator_vfx/（manifest.json+按干员分目录的 particles/*.uasset.json（Cascade 发射器参数原始 JSON）+materials/*.uasset.json+textures/*.png）。背景报告 extracted/logs/operator_vfx_assets.md（必读）。\n- 完整链干员（优先实装）：红狼、威龙、露娜、液氮、赤枭（manifest 里 status=完整链的 33 条技能记录）。蜂医/骇爪/蝶/牧羊人/回响为 partial，按 manifest 的 status 实装，缺的部分不要编。\n- 机制数值：extracted/skill_mechanics/ 与 extracted/logs/_r10_data/master.json（212 行技能机制：冷却/持续/数量/触发方式/投掷物参数，报告 extracted/logs/operator_skill_mechanics.md）。**技能机制必须以这份为准**：冷却、持续、充能数、MP/SOL 双行差异（威龙磁吸/深蓝防爆等 7 组双行）。\n- 图标映射：技能图标资产路径在 operator_vfx_assets.md R8 与 master.json；用户明确要求用游戏实机全面战场右下角那套图标，不是之前用错的那套。\n\n要求：\n1. 5 个完整链干员的技能特效按 Cascade 参数复现（发射器生成率/生命周期/速度分布/尺寸曲线/SubUV 帧动画/Ribbon，UE cm→m 换算）；材质参数与 PNG 贴图按 manifest 接上。UE Cascade→Three.js 粒子映射层自己写，参数值一律取自粒子 JSON，不得拍脑袋。\n2. 技能机制接线：冷却/持续/数量按 master.json 实值；电击箭（露娜 4008002）电场 4s/黏人 3s/RCV 2s；红狼/无名/赤枭大招 25s 等 Buff 时长按表。\n3. 技能 UI：图标换成映射表里的游戏原版图标资产；位置在右下角且不与其他 UI 重叠；显示技能剩余数量/充能层数（数据源=SlotCharing Max/Init）；模式按全面战场（4 号/6 号位技能图显示逻辑以 master.json 为准）。\n4. 禁止「进靶场自动释放一堆技能」的演示逻辑（用户明确投诉过）。\n5. 音效链未闭合（operator_vfx_assets.md §5.3 诚实 not_found），不要伪造音效。\n\n边界：只改 range/ 技能/特效/UI 相关文件+range/public 特效资产目录；**不碰角色渲染、武器动画、场景、枪械数据、入口文件、vite.config**；不跑 vite build（kimi 统一构建）；vite dev 在 127.0.0.1:4173 跑着（热更新）可即时验证。游戏目录只读，不启动游戏。\n自测：改完确认 vite dev 编译无错、4173 下 5 干员技能可释放且特效为原版资产、冷却/数量按表、UI 右下角不重叠。报告写中文；**先写一行中文测试，若变问号则整份写英文**（九轮 luna 出过中文全丢事故）。"
+}

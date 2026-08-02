@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-luna",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：ABP_LowerBodyFor1P_3P 下半身动画蓝图 dump 解析。\n背景：fp_body_mesh_source.md 定案 FPP Lower = Body_3P mesh + 专用 AnimBP ABP_LowerBodyFor1P_3P_C（71 条记录），资产在 pak-0-1-pakchunk34（tmp_char_asset_list.txt:10183 有记录），但未 dump，节点图不可得。\n任务：1) grep asset_list_full_20260731.txt 精确定位 ABP_LowerBodyFor1P_3P（路径含 BluePrints/Characters/AnimationBP/Player1P/）；2) DFExtract export 导出其 uasset JSON dump 到 extracted/dump_anim_probe/；3) 解析节点图：状态机结构、LayeredBoneBlend/section mask（下半身如何与上身分层）、播放哪些动画序列引用、是否有 pitch 分配逻辑；4) 同时 grep 下半身相关动画序列资产（LowerBody/Leg 相关 Anim），列出可提取清单；5) 产出报告：AnimBP 结构全解 + 对 range/ 前端 1P 身体渲染的指导结论（该怎么分层、播什么）。\n\n产出：extracted/logs/fp_lowerbody_animbp.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-luna）。\n\n纪律（违反=废品）：\n- 只许写你负责的那一份报告到 extracted/logs/ + 你需要的导出产物到 extracted/ 对应目录，禁止改 range/\n- 工具链：cd C:/Users/Lenovo/Documents/kimi/workspace/tools/app && dotnet DFExtract_fixed.dll list|export \"D:/df_pak_copy/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll [--filter a,b,c] [--out x] [--assets assets.txt]；全量资产清单已在 extracted/asset_list_full_20260731.txt（142554 条，先 grep 它再决定导出什么，不要盲导）\n- 只用游戏内数据；找不到写「未找到」+ 搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到\n- 游戏目录只读禁止启动/写入；副本 D:/df_pak_copy 只读\n- 参考 extracted/logs/MECHANISMS_INDEX.md 避免重复挖"
+}

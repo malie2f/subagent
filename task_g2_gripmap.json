@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-luna",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：握把类型→1P 握持动画选择映射。\n背景：gunsmith_mechanism.md §7 确认 PartsFunctionDataTable.AccessoryAnimPose/AccessoryTPPAnimPose 全 None，848 个非零 PartsDataTable.AnimFunctionId 在当前副本没有连接表。用户要求握姿随握把变化（游戏内确实如此）。\n任务：1) 把 848 个 AnimFunctionId 按值聚类，统计有多少唯一值、对应哪些配件类型（前握把/后握把）；2) 在 extracted/parsed/ 找任何含 Anim/Function/Pose 的表尝试解析 AnimFunctionId 的指向（PartsFunctionDataTable 行键？WeaponPartAnim 表？）；3) 扫 dump_tables/ 的动画蓝图/AnimInstance dump，找握把动画选择的状态机逻辑（类似 scope_unresolved.md 用 AtomFSM 的先例）；4) 扫 anim_json_guns/ 里是否存在握把变体的 1P 剪辑（命名含 Grip/Angled/Vertical 等）。产出：能解出多少解多少，解不出的明确链路断在哪一环。\n\n产出：extracted/logs/grip_anim_mapping.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-luna）。\n\n纪律（违反=废品）：\n- 纯研究：只许写你负责的那一份报告到 extracted/logs/，禁止改 range/ 和 extracted/ 下其他任何文件\n- 只用游戏内数据：extracted/ 已解包产物、D:/df_pak_copy 副本（只读）、D:/Delta Force 游戏目录（只读，禁止启动游戏、禁止写）\n- 找不到就写「未找到」+ 搜过哪里，禁止编造数值；每条结论带证据（路径+行号/字段）和置信度（实证/推断/未找到）\n- 参考既有报告避免重复挖：extracted/logs/MECHANISMS_INDEX.md（13 份已验收权威报告索引）"
+}

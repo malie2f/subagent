@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【九轮·瞄具分划全量导出+变倍全参数】请以最高思考档位运行。产出报告 extracted/logs/reticle_full_export.md。\n\n背景：三角洲行动逆向。瞄具渲染混合管线已定案（extracted/logs/scope_render_data.md：RT/NoRT 双支路、分划=贴图预设+材质合成、XM157 离散 {1.5,3,7}），但该轮只做了 3 个代表镜。本轮做全量。\n\n任务：\n1. **分划贴图全量导出**：对 scope_current_mapping.md 里 A 档 42 个现存瞄具（mesh 在 pakchunk31），逐个查 WeaponPart_ScoFunctionTable 行的 CrosshairPresetId_HD/TickmarkPresetId_HD/TickmarkPresetId_Low_HD/bEnableDynamicTickMark/bTickmarkDynamicScale，按 CrosshairPresetTable 解出 SoftAsset 贴图路径，全部导出为 PNG，按瞄具分目录组织：extracted/reticles/<镜名>/\n2. **变倍镜 13 行全参数**：scope_render_data.md §6.2 列了 13 个 SupportedZoomRates 非空的瞄具，把这 13 行的 ScoFunctionTable 全部字段逐列导出（含 ZoomingSwitchValue/UnZoomingSwitchValue/LerpTime/RTZoomRateFactor/bSupportUseRT 等）\n3. **manifest**：生成 extracted/reticles/manifest.json（镜→ItemId→preset IDs→贴图文件→变倍档位→RT 支持），供前端直接消费\n4. 导出失败的镜逐个登记原因\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <目录> --assets <清单>；表数据：WeaponPart_ScoFunctionTable 已有 CSV（先 ls extracted/ 与 extracted/dump_tables/ 找，勿重复 dump）。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据。脚本写 tools/。"
+}

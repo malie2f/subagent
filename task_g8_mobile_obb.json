@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【八轮·手游 OBB 挖掘】请以最高思考档位运行。产出报告 extracted/logs/mobile_obb_mining.md。\n\n背景：三角洲行动逆向项目。端游 pak 配置面已大量实证（见 extracted/logs/MECHANISMS_INDEX.md 索引），但有 5 个代码级残点在双端二进制上均被封死（端游 EXE 加壳虚拟化、手游 libUE4.so 函数级加密），只能靠数据面继续挖。手游官方 APK 已备好：D:/df_mobile_sample/dfm_official.apk（1.49GB，com.tencent.tmgp.dfm 官方包），其中 assets/main.obb.png 是 1.28GB 的改名 OBB（扩展名伪装成 png），极可能内含手游 pak。\n\n任务：\n1. 用 unzip 把 assets/main.obb.png 提取到 D:/df_mobile_sample/obb/（该目录可写）\n2. 鉴定容器格式（xxd 看魔数；可能是 UE4 pak、zip、或自定义容器），必要时用 binwalk/手工切分找出内嵌 pak 列表\n3. 若是 UE4 pak：尝试用项目密钥集解密——工具：cd tools/app && dotnet DFExtract_fixed.dll export <pak目录> --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <输出目录> --assets <清单文件>（该工具也支持 list 类子命令，--help 自查）。也可全网搜索手游版三角洲 AES 密钥（用户已授权联网找密钥）\n4. 挖到的配置表重点对以下五点做跨端印证或补漏：①ADS 中途反向 alpha 绑定策略；②MDV 最终变换公式（端游已实证 WeaponZoomDataSettingHD 8 倍率桶/DefaultMDV=1.33/官方语义「屏幕距离系数」）；③后坐三通道（ECM_Fire=5/CameraShake=8/WeaponRecoil=12）同帧覆盖顺序；④M67 引信起算事件（端游已实证 PreFireTime 0.433s/PreFireKeepTime 3.333s/ExplosionSeconds 5.0s）；⑤HP=100 默认值出处\n5. 另留意手游独有的瞄具渲染/后坐力配置文件\n\n纪律：游戏目录 D:\\Delta Force 只读；不启动游戏；不读运行时内存；range/ 前端禁止改动；D:/df_mobile_sample/ 可写；结论分实证/推断/未找到三档，每条给证据（文件路径+字段/偏移），找不到写未找到+检索记录。脚本写到 tools/ 下。"
+}

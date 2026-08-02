@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "timeout_sec": 3600,
+ "wait": false,
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "reasoning_effort": "max",
+ "task": "【瞄具镜壁专项：ADS 看到镜筒内壁的根因诊断+机制修复】先读 docs/MISSION_20260801.md 第〇原则（根因/证据/机制，症状补丁打回）、extracted/logs/impl_scope_restore.md、extracted/logs/scope_mechanism.md、extracted/logs/scope_lens_geometry.md（164 镜逐镜几何真值）、extracted/logs/kb_weapons.md 瞄具章节。\n\n症状（用户多次打回的原话）：开镜瞄准看到的是『大镜子内壁』——相机伸进 3D 镜筒模型内部，看到镜筒内壁，而非游戏内那种干净的瞄具视野。这是从立项起反复翻车的老问题，从未专项修过。\n\n任务（按序，每步落盘防死）：\n1. 现状实证：vite 4565 + CDP 9565 起真页面，M7+XM157（非 RT 镜）和一把 RT 镜各截 ADS 帧序列（腰射→ADS 过渡→全 ADS→开火），确认镜筒内壁在哪些镜/哪些倍率下可见、可见的根因（相机位置 vs 镜筒 mesh 包围盒关系、近裁剪面、镜筒 mesh 是否该在 ADS 隐藏）。帧存 extracted/logs/scope_wall_assets/before/。\n2. 游戏机制逆向：查已提取数据里 ADS 时镜筒 mesh 的处置机制——scope_lens_geometry.md 已有镜片中心/半径/镜筒轴长真值；查 ViewParamTable/瞄具表的 aimCamOffset/眼距字段（impl_scope_restore.md §6 遗留 aimCamOffset M7=-3cm 未接）；查 kb_weapons.md 有没有已答未用的遮挡机制。游戏怎么做就怎么做；数据里没有的机制不许编（到时诚实标注）。\n3. 机制修复：按逆向结论修（候选方向：ADS 时镜筒外壳 mesh 隐藏/半透明化、近裁剪面按镜筒几何真值设置、aimCamOffset 权威值接入、镜片平面 overlay 替代镜筒内部视野），每个修法都要回答『游戏数据出处是什么』。改 range/src/visual/scope_pip.js/gun_view.js 或生成器，禁手改 range/src/data/*.js。\n4. 验收物：a) cd range && npm test 绿；b) after 帧序列 extracted/logs/scope_wall_assets/after/ 同机位对照，ADS 全状态时镜筒内壁不可见、分划/视野正常；c) 报告 extracted/logs/fix_scope_wall.md（根因+游戏数据证据+机制解释+前后帧索引+诚实边界）。\n\n环境血泪：apply_patch 必须以 *** End Patch 结尾；rg 别用 -g glob 用 rg \"pattern\" 目录；删文件用 bash rm/python；端口 4173/4521/4522/8765/4564/9564 别碰（4564 是性能验证轮在用的），探针用完杀进程；游戏目录只读；先写报告骨架再填充。署名 kimi 验收。"
+}

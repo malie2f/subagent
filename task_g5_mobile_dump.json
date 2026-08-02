@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【分析任务·手游 Garena 服 dump 挖掘】产出 extracted/logs/mobile_dump_mining.md。\n背景：PC 国服 EXE 加壳，5 个机制点静态不可逆。github.com/eikarna/deltaforce-dump 是手游 Garena 服（com.garena.game.df，UE4）的 dump，含 AIOHeader.hpp（游戏结构体 C++ 头）、Offsets.hpp（函数/类偏移）、Objects.txt、script.json。手游与端游同一套游戏逻辑代码库，结构体字段布局高度同源。\n步骤：\n1. git clone --depth 1 https://github.com/eikarna/deltaforce-dump C:/Users/Lenovo/Documents/kimi/workspace/extracted/mobile_dump（如 clone 失败用 FetchURL/直接下 raw 文件）\n2. 在 AIOHeader.hpp/Offsets.hpp/Objects.txt 中定向搜索以下 5 个主题的结构体与偏移，逐条摘录（字段名/类型/偏移/所属类）：\n   a. ADS/瞄准：ZoomingPercent、bIsInZoomInProcess、bIsInZoomingProcess、AimingControlAction 相关类——尤其找 alpha 插值/反向继承相关字段（如 ReverseAlpha、StartAlpha、ZoomInTime、ZoomOutTime）\n   b. MDV/灵敏度：MDV、MDVFactor、DefaultMDV/MaxMDV/MinMDV、MDVSwitchingMode、ADSSensitivity\n   c. 后坐：WeaponRecoil、RecoilRecover、FireShake、GunKick、CameraModifier 相关类——找能推断同帧顺序的字段（Priority/BlendWeight/Additive 标志）\n   d. 手雷：ExplosionSeconds、Throwable、Fuse、Cook、Projectile——找引信起算相关字段\n   e. HP：GPAttributeSetHealth、MaxHealth、Health——找默认值/初始化相关\n3. 对照我们已知的端游实证字段名（extracted/logs/exe_deep_static.md §3 有完整字段清单），标注哪些手游 dump 里也有（跨端同源证据）、哪些是端游没有的新字段（增量信息）\n4. 如 script.json/Objects.txt 里有相关函数地址/符号，一并摘录\n纪律：只读分析+clone 到指定目录；找不到写未找到；每条给证据（文件+行号/偏移）；不改 range/；不启动游戏。"
+}

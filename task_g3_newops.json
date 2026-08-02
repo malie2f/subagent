@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-luna",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：新干员（蝶/回响/液氮/赤枭）技能与特效提取（4 锁钥 pak 已解锁，首次可挖）。\n背景：pak_keys_probe.md 后已把 chunk1/3/206/sensicommon203 补拷进副本并成功挂载（+60322 包）。此前 skill_mechanism.md 只有 13 名现役干员。\n任务：1) grep asset_list_full_20260731.txt 找这 4 名新干员的角色/技能/特效资产（中文名可能译作 Butterfly/Echo/Nitrogen/Owl 或直接代号，先扫 operator_db/ 现有 13 人的资产命名模式，再用同模式找新人；也可对比 asset_list 与既有提取覆盖找新增 SkillDataConfig/Operator 行）；2) 导出相关 uasset dump（技能表/干员表/Buff/特效引用）；3) 产出 4 名新干员的技能机制报告：技能名/类型/参数（速度/半径/时长/次数）/特效资产引用，全部字段级证据。找不到的干员明确标未找到。\n\n产出：extracted/logs/new_operators_skills.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-luna）。\n\n纪律（违反=废品）：\n- 只许写你负责的那一份报告到 extracted/logs/ + 你需要的导出产物到 extracted/ 对应目录，禁止改 range/\n- 工具链：cd C:/Users/Lenovo/Documents/kimi/workspace/tools/app && dotnet DFExtract_fixed.dll list|export \"D:/df_pak_copy/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll [--filter a,b,c] [--out x] [--assets assets.txt]；全量资产清单已在 extracted/asset_list_full_20260731.txt（142554 条，先 grep 它再决定导出什么，不要盲导）\n- 只用游戏内数据；找不到写「未找到」+ 搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到\n- 游戏目录只读禁止启动/写入；副本 D:/df_pak_copy 只读\n- 参考 extracted/logs/MECHANISMS_INDEX.md 避免重复挖"
+}

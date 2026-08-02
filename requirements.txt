@@ -1,0 +1,21 @@
+# MCP Hub 依赖
+# 核心 MCP 协议
+mcp>=1.0.0
+
+# HTTP 客户端
+httpx>=0.27.0
+
+# 数据校验
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# 异步支持
+anyio>=4.0.0
+
+# 官方 SDK（按需安装）
+anthropic>=0.39.0
+openai>=1.50.0
+
+# 测试
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

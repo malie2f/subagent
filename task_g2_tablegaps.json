@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：表缺口二轮补挖（四个小缺口合一路）。\n1) MovementSpeedID=1207：movement_mechanism.md 确认它在 Character_MovementSpeedConfig.csv 和 Combination 速度表里都没有。扫 extracted/parsed/ 全部 csv 和 dump_tables/ 找 1207 的任何出现；若无，列出引用 1207 的武器清单并标「当前副本缺口」。\n2) 技能持续时间：skill_mechanism.md 里 D=未找到† 的技能（在能力蓝图或 native 父类）。扫 dump_ops/、dump_tables/ 的 Ability/Skill 相关 dump，把能补的补上。\n3) 玩家 HP：ballistics_damage_mechanism.md 标「未找到统一玩家 HP」。扫 parsed/ 的 Health/Character/Attribute 相关表（游戏内 UI 显示 100/100，找字段出处）。\n4) 变倍切档时长：scope_mechanism.md 确认 ScoFunctionTable 三个 *Curve 字段全空、无切档秒数。改从动画侧找：瞄具/武器的变倍动画 montage 或 ZoomAnimCurve 相关资产，给出切档时长的动画出处或标未找到。\n\n产出：extracted/logs/table_gaps_round2.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-terra）。\n\n纪律（违反=废品）：\n- 纯研究：只许写你负责的那一份报告到 extracted/logs/，禁止改 range/ 和 extracted/ 下其他任何文件\n- 只用游戏内数据：extracted/ 已解包产物、D:/df_pak_copy 副本（只读）、D:/Delta Force 游戏目录（只读，禁止启动游戏、禁止写）\n- 找不到就写「未找到」+ 搜过哪里，禁止编造数值；每条结论带证据（路径+行号/字段）和置信度（实证/推断/未找到）\n- 参考既有报告避免重复挖：extracted/logs/MECHANISMS_INDEX.md（13 份已验收权威报告索引）"
+}

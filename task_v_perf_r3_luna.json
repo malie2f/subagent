@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-luna",
+ "timeout_sec": 3600,
+ "wait": false,
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "reasoning_effort": "max",
+ "task": "【性能r3：首技能长帧归因+M7视模加载失败】先读 docs/MISSION_20260801.md 第〇原则、extracted/logs/impl_perf_warmup.md（§7 复测数据为准）、extracted/logs/audit_perf.md。背景：预热接线已验收（programs 7/7 零新增闭环），但首技能 max<20ms 仅 2/7 达成：侦察箭 21.6ms、火焰弩 27.9ms、温感震撼弹 41.8ms、烟雾弹 83.5ms、磁吸炸弹 97.5ms（电击箭 14.4/手雷 14.1 已达标）。探针还发现 ?weapon=M7 页面反复报『持枪视模加载失败: SyntaxError: Unexpected token \"<\", \"<!doctype\"...』=某 fetch 拿到 HTML（404 页）当 JSON 解析。\n\n任务A（长帧归因，不许猜）：用 PerformanceObserver longtask + CDP Profiler（或 self-profile）在真页面（vite 4566/CDP 9566）对 烟雾弹(83.5ms) 和 磁吸炸弹(97.5ms) 两个最差样本采集首技能窗口的 JS 调用栈/长任务归因，拿到『长帧花在哪』的实证（函数名+耗时），再决定修法。可能方向仅供假设：粒子系统首帧 JS 构建（emitter 对象/几何 Buffer 分配）、JSON parse、GC、纹理 decode。没有 profile 证据不许改代码；有证据后按机制修（如池化/预分配移到 warmup），修完同探针复测给 before/after 数据。\n\n任务B（M7 视模加载失败）：定位是哪个 URL 返回 HTML（大概率是路径拼错/资产缺失落到 SPA fallback），修到生成器或代码（禁手改 range/src/data/*.js），修后真页面 M7 视模加载无此 warning。\n\n文件边界：scope_pip.js 是镜壁专项（ffa1e2b29d2d 在飞）领地不许碰；gun_view.js 只允许任务B 的最小加载路径修复。\n\n验收物：①cd range && npm test 绿；②长帧归因 profile 证据文件+修后复测 before/after（目标：烟雾弹/磁吸炸弹首技能 max<20ms）；③M7 页面视模加载 warning 清零的探针证据；④报告 extracted/logs/impl_perf_r3.md（先写骨架再填充）。\n\n环境血泪：apply_patch 必须以 *** End Patch 结尾；rg 用 rg \"pattern\" 目录 不用 -g；删文件用 bash rm/python；端口 4173/4521/4522/8765/4564/9564/4565/9565 别碰，探针用 4566/9566 用完杀；游戏目录只读。署名 kimi 验收。"
+}

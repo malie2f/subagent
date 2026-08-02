@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 3600,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问；找不到的数据写明\"未找到+搜过哪里\"，禁止编造数值。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md（尤其补记22/23）了解已有结论，不要重复劳动；与既有报告（extracted/logs/*.md）交叉引用而非重写。\n\n【专项：干员技能机制（数值/规则层）】产出 extracted/logs/skill_mechanism.md\n\n特效层另有人做（bc11efc4976e），你只管机制与数值：\n\n1. 现役干员（露娜/骇爪/蜂医/红狼/威龙/乌鲁鲁 等，extracted 里有数据的逐个来）技能表：技能类型（战术/大招/被动）、冷却、使用次数/充能、持续时间。\n2. 露娜电击箭专项：反弹默认状态（用户说默认关闭反弹、切出时按右键开启——找 dump 里的开关字段）、蓄力机制（拉弓蓄力条时长/蓄力对弹道的影响）、箭矢弹道（速度/重力/反弹次数/伤害/电击范围与时长）。\n3. 技能 UI 数据：技能图标资产路径、右下角 UI 布局数据（全面战场 4/6 号位 vs 烽火地带差异）、剩余次数显示。\n4. 手雷/烟雾等投掷物：引信时长、弹道、反弹。\n5. 技能与动作的联动：释放技能时的 1P 动画剪辑、技能打断规则。\n6. 已知边界：chunk1/3/206/sensicommon203 四 PAK 缺新密钥，涉及的新干员（蝶/回响/液氮/赤枭）标\"锁定PAK\"即可。\n7. 结论：每干员技能参数表（每项 dump 出处+置信度）。"
+}

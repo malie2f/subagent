@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【十轮·BHD 静态脱壳可行性评估】请以最高思考档位运行。产出报告 extracted/logs/bhd_unpack_eval.md。\n\n背景：三角洲行动逆向。BlackHawkDown（黑鹰坠落战役）pakchunk0-WindowsClient.pak 23.7GB 是全客户端唯一真锁：两轮密钥 hunt（238 个公开 AES 值）零命中，footer EncryptionKeyGUID=全零，BHD 客户端 EXE 与 ShippingBase.dll 均加壳（详见 extracted/logs/bhd_key_hunt2.md 与 locked_assets_round2.md）。\n\n注意：这是**纯静态评估任务**，不是让你真的脱壳。红线：不启动任何游戏可执行文件、不读运行时内存、不做动态调试。\n\n任务：\n1. 静态鉴定 BHD 客户端保护壳的具体家族（节区名/熵/导入表/特征字节比对 VMProtect/Themida/Enigma/腾讯 ACE 等已知壳特征），与端游主线 EXE 保护形态对比；\n2. 评估静态路各候选的可行性与工作量：a) 壳内明文密钥串静态扫描（已知 UE4 AES 密钥常以 hex 字面量嵌在初始化代码，加壳后静态不可见——验证这一点）；b) pak 结构侧信道（pakchunk0 是否含未加密子区/嵌入的 ucas/utoc 或 IOStore 容器可绕过）；c) 公开来源再扫（UE4 密钥数据库/CS.RIN 快照/社区工具内置库——可联网检索）；d) BHD 是否有独立 demo/试玩版/旧版本客户端未加壳；\n3. 给出明确的「继续/放弃」建议与每条路的工作量评级；若发现任何可直接试的密钥或旁路，实测验证（只读挂载，禁止写入游戏目录）。\n成功标准：保护壳家族定案+每条候选路的可行性结论（实证/推断/不可行+理由）；有任何新密钥线索则实测并报告结果。\n\n工具：tools/ 下现有分析脚本；arm64 venv 不适用（这是 x64），可用系统 python+pefile（若无则在 tools/ 下建 venv 装）；DFExtract list 可测密钥；样本路径在 D:/Delta Force 下 BlackHawkDown 目录（只读！）；可参考 extracted/logs/bhd_key_hunt2.md 的脚本与 results.json。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；脚本写 tools/。报告写中文（若你的 CLI 写入中文会丢失，用英文写，禁止写成问号乱码）。"
+}

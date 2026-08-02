@@ -1,0 +1,26 @@
+# 敏感配置 — 含 API key，绝不提交
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 数据
+data/
+logs/
+.mcp-hub/
+*.json.bak
+
+# 日志
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

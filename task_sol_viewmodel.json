@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-sol",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 2400,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问\"要做什么\"；找不到的数据写明\"未找到+搜过哪里\"，禁止编造。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md 补记23 了解已有结论，不要重复劳动。\n\n【专项：视模渲染管线与手臂显示范围机制】产出 extracted/logs/viewmodel_render_mechanism.md\n\n我们已实装\"视模独立 FOV 双 pass\"（WeaponViewParamTable idleWeaponFov=85/aimWeaponFov=75），但只验证了 AR ViewId=1101 一行。需要你补全机制全景：\n\n1. WeaponViewParamTable（extracted/parsed/WeaponBase_WeaponViewParamTable.csv）全表解析：每个 ViewId 的 idle/aim weaponFov、相机偏移（idleCameraOffset/aimCameraOffset，单位？）、其他字段含义。哪些武器用哪个 ViewId（WeaponAimingTable/武器表里的引用链）。逐武器列清单。\n2. weaponFov 是否随玩家设置的世界 FOV 缩放？游戏设置里有没有\"视模 FOV 独立/跟随\"开关？在 dump 的设置表（SystemSetting 类）里找证据。\n3. 手臂显示范围还受什么影响：1P 手臂 mesh 的裁剪（近裁剪面？专用裁剪平面？）、手臂动画 Idle 姿势数据（ extracted 下的 1P 手臂动画剪辑清单与 Idle 姿势手部位置）、武器长度/枪管配件对视模位置的影响（有没有 weaponOffset/长度补偿字段）。\n4. 开镜过渡中 weaponFov 曲线（AdsCurve_weaponFov_default 等）与相机 FOV 曲线（AdsCurve_cameraFov_default）的完整数据：曲线逐点值、时长、两曲线如何叠加（我们假设同一 t 各自采样，验证）。\n5. 结论：要在 Web 端 1:1 还原\"手臂在屏幕里显示多少\"，完整参数清单（每项给 dump 出处）。"
+}

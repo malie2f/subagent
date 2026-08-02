@@ -1,0 +1,9 @@
+{
+ "runtime": "kimi",
+ "model": "kimi-code/kimi-for-coding",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 2400,
+ "wait": false,
+ "task": "你是逆向工程团队的数据分析师。项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。所有分析对象都是已经解包到磁盘上的数据文件（extracted/ 目录），纯离线数据核对，直接开工，禁止反问。\n\n【任务：特效数据保真专项】产出 extracted/logs/fx_special_reverse.md（中文）。\n\n1. 读 range/public/fx/fx_config.json 与 extracted/ 下的 FX dump（dump_fx、fx_emitters、粒子参数 JSON、extracted/logs/ 既有 FX 报告）。\n2. 逐项核对 fx_config.json 里每个参数能否在 dump 中找到出处：列三栏表（参数 | 游戏 dump 出处:字段 | 状态=有出处|推断|无出处）。对\"推断/无出处\"的，在 dump 里搜索正确值并给出修正建议（附字段路径）。\n3. 现役干员（露娜原皮/黑皮）技能特效的发射器参数（数量/寿命/频率/尺寸/颜色）与 dump 的差异清单。\n4. 命中反馈（impact）链路：数据是否齐全、main.js 未接线的接口清单（只列清单，不改代码）。\n5. 已知边界：chunk1/3/206/sensicommon203 四个 PAK 缺新赛季 AES 密钥，不要尝试解密；涉及其中的数据标注\"锁定PAK，需新密钥\"即可。\n\n【纪律】只许在 extracted/logs/ 下写报告文件，禁止改动 range/ 任何文件，禁止改动游戏目录。"
+}

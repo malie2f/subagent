@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【六轮攻坚·pak 侧 CDO/数据表寻宝：EXE 五点的数据面】产出 extracted/logs/pak_cdo_treasure.md。\n背景：端游 EXE 加壳，5 个机制点（ADS反向alpha/MDV≥2公式/后坐三通道同帧顺序/M67引信起算点/HP=100默认值）代码面封死。但手游 dump（extracted/mobile_dump_mining.md）证明这些机制都有对应数据结构——数据面（pak 内数据表/蓝图 CDO）可能直接带数值，不需要反汇编。\n数据源（全部本地只读）：\n1. extracted/dump_tables/*.json（已 dump 的表）+ extracted/parsed/*.csv\n2. extracted/asset_list_gamedir_20260731.txt（470,584 包全量清单，找还没 dump 的目标表）\n3. 需要新 dump 时用：cd tools/app && dotnet DFExtract_fixed.dll export \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <dir> --assets <清单文件>（工具会同时产 GLB/uasset JSON；对 DataTable/Blueprint 类资产会产 JSON）\n四个寻宝目标，按优先级：\nA. **MDV/ADS 灵敏度数值表**：手游有 FWeaponZoomDataSettingRowHD（DefaultMDV/MaxMDV/MinMDV/ADSSensitivity/ZoomRate 每倍率一行）。端游 pak 里找 WeaponZoomDataSetting / SensitivitySetting / HDSetting 相关 DataTable 资产（先在 470k 清单搜 ZoomData/Sensitivity/MDV），dump 出实际数值行——如果每倍率的 MDV/ADS 灵敏度值都在表里，「MDV≥2 公式」就从代码问题降级为查表问题\nB. **HP=100 默认值**：搜 CharacterAttribute/AttributeSet/HealthData/PlayerAttribute 相关表与角色蓝图 CDO（BP_DFMCharacter/BP_HallCharacter 等），找 MaxHealth 初始值；先查已有 dump（dump_new_operators_20260731 里有 388 个干员蓝图 dump，搜 MaxHealth/Health 默认值）\nC. **ADS 时长/开镜时间**：搜 WeaponZoom/ADS/Aim 相关表中 ZoomInTime/AimTime/ADSTime 类字段（逐瞄具/逐枪的开镜时长若在表里，ADS alpha 的时间轴就有真值）\nD. **M67/投掷物引信**：在 WeaponThrowable 相关表中搜 PreFireKeep/ThrowTime/ExplosionSeconds/PredictBeginTime 类字段（手游 Pre/ExplosionPredictBeginTime 提示 pak 表可能也有）\n纪律：只用游戏内数据；每条数值给证据（资产路径+dump 文件+行号）；找不到写未找到+搜索记录；不改 range/；不启动游戏；游戏目录只读。置信度三档：实证/推断/未找到。"
+}

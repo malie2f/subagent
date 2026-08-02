@@ -1,0 +1,8 @@
+{
+  "runtime": "opencode",
+  "model": "opencode/deepseek/deepseek-v4-flash",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【十轮·G3/PTR32 动画替代源追查】请以最高思考档位运行。产出报告 extracted/logs/g3_ptr32_anim_hunt.md。\n\n背景：三角洲行动逆向。武器动画 manifest 已升至 36 族/40 枪/138 剪辑，唯二真空是 G3 与 PTR32——九轮 weapon_anim_fill_a.md 定案「真无动画数据」（在主线 pak 的常规动画目录下）。但游戏内这两把枪显然有动画，数据一定在某个地方。\n\n任务：\n1. 复核九轮定案：读 extracted/logs/weapon_anim_fill_a.md 的 G3/PTR32 条目，确认当时检索的目录/关键词范围；\n2. 扩大检索面：a) 资产清单 extracted/asset_list_gamedir_20260731.txt 全文检索 G3/PTR32 的所有变体命名（G3 可能叫 G3A3/HK_G3/G3BattleRifle 等；PTR32 同理 PTR/PTR_32）；b) 检查这两把枪是否**共用其他族动画**（游戏里冷门枪常复用同平台动画——查 WeaponAnim 配置表/GunDesc 里 G3/PTR32 的动画族字段指向，比如可能指向 AK/AR 族的动画路径）；c) Dolphin 热更 pak 清单（若十轮 dolphin_audit 已出 extracted/dolphin_audit/ 则搜它，没有就跳过）；d) 手游 OBB 清单 D:/df_mobile_sample/obb/mobile_pak_asset_list.txt 检索；\n3. 若找到共用指向：实证该配置字段，结论=「G3/PTR32 复用 X 族动画」并把对应族 manifest 映射补上（只产数据 JSON，不动前端）；若找到独立资产：导出并转 anim_json_weapon 同构 JSON+refpose 自检；若全部落空：给出检索面全覆盖证据，定案「当前客户端确实无数据」。\n成功标准：G3/PTR32 动画来源二者其一——共用指向实证/独立资产转出/全覆盖落空定案。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump/list \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...；GunDesc/武器配置表已 dump 在 extracted/parsed/ 与 extracted/dump_tables/（先搜已有）。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；脚本写 tools/。报告写中文（注意：若你发现写出的中文变成问号乱码，改用英文写整份报告，数据表格保持原样）。"
+}

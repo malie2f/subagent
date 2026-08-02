@@ -1,0 +1,8 @@
+{
+  "runtime": "opencode",
+  "model": "opencode/deepseek/deepseek-v4-flash",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【八轮补·刀具动画+弹匣动画资产复核】请以最高思考档位运行。产出报告 extracted/logs/knife_mag_anim_data.md。\n\n背景：三角洲行动逆向项目。你上一轮（locked_assets_round2.md）已完成 pak 锁定面复核（121+20+29 pak 全挂载、唯一真锁=BHD 23.7GB）。但上一轮任务书有 3 个条目未覆盖，本轮补齐。\n\n条目：\n1. **刀皮资产**：挽歌、坠星者（近战刀皮肤）——在 extracted/asset_list_gamedir_20260731.txt（470,584 条）里检索资产路径，实测能否导出 mesh/贴图\n2. **怜悯、救赎攻击动画**：用户报告靶场里怜悯攻击后拇指异常弯曲、救赎攻击后播放意义不明的第二段动画。请从 pak 数据回答：①这两把刀的攻击动画资产到底有哪些（全部列出：攻击段/收刀段/连击段，含资产路径+动画时长+轨道数）；②是否存在多段连击动画被错误串接的可能；③持刀 idle/握姿动画资产清单（对照：用户已确认信条、淬火小刀握姿对，怜悯/救赎有问题）\n3. **弹匣动画数据**：换弹时枪械的弹匣是否有独立骨骼动画/track？检查代表性武器（M7、AKM、M4A1 任选其二）的换弹动画资产：骨骼轨道清单里有没有弹匣骨（mag/magazine/b_mag 类命名），还是弹匣动画在单独的动画资产里\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <输出目录> --assets <清单文件>；动画 uasset 可用同工具 dump 子命令序列化为 JSON 读轨道。导出物放 extracted/knife_mag_anim/。\n\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁止改动；结论分实证/推断/未找到三档，每条给证据（资产路径+字段）；找不到写未找到+检索记录。脚本写到 tools/ 下。"
+}

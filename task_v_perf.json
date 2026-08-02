@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-luna",
+ "timeout_sec": 3600,
+ "wait": false,
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "reasoning_effort": "max",
+ "task": "【性能预热验证轮】背景：性能实装路（8d57427f0e21）死前已落地 range/src/data/skill_warmup_manifest.js（9.4K，技能特效预热清单）+main.js/cascade_vfx.js/skills.js/bow_view.js 的预热接线，但从未验证；此后弓r5/特效r5 又改过 cascade_vfx.js/skills.js（2002017 命中链已从 Luna_Black 地爆改为 Scout Line，注意预热清单是否要同步）。先读 docs/MISSION_20260801.md、extracted/logs/audit_perf.md（基线：warmup 25 programs→首次技能 35、max 35.4ms）、extracted/logs/impl_perf_warmup.md（现 4531B 骨架待回填）、range/src/data/skill_warmup_manifest.js。任务：①cd range && npm test 绿；②用 headless 性能探针实测：renderer.info.programs 在 warmup 后 vs 首次释放各技能后——硬指标 after_skill programs == after_warmup（不再有 shader 编译突刺）、首次技能帧 max<20ms；探针端口 vite 4564+CDP 9564，用完杀，别碰 4173/4521/4522/8765；③若预热清单漏了当前 runtime 链（如 Scout Line、赤枭火焰弩、红狼烟），补进 manifest 再测；④把实测数据+结论回填 extracted/logs/impl_perf_warmup.md（含指标达成与否的诚实结论，不达标就写明差距，不许编数字）。环境：apply_patch 必须 *** End Patch 结尾；rg 只扫具体子目录勿扫 extracted/ 根；删文件用 bash rm 别用 Remove-Item；单条命令 25 秒内；改 range/src/data/*.js 只能改生成器（skill_warmup_manifest.js 是手写清单可改）。游戏目录只读。"
+}

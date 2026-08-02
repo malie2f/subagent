@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 7200,
+  "wait": false,
+  "task": "【项目】三角洲行动逆向+Web靶场。开工前必读（按序）：\n1. docs/README.md（铁律+阅读清单）\n2. docs/PROJECT_STRUCTURE.md（range/ 模块地图）\n3. docs/CONVENTIONS.md（工程纪律）\n4. docs/MISSION_20260801.md（本轮任务总书，你是 A 路）\n5. 专项：extracted/logs/fp_lowerbody_animbp.md（1P下半身AnimBP节点图全解）、fp_body_render_mechanism.md、fp_body_mesh_source.md、asset_usage_mechanism.md（3P容器Yaw=-90°等）、impl_fpbody_fix.md（上一版报告，了解现状=RefPoseLower降级）\n\n【用户实机打回症状】①身体反向：用户看到的是屁股/背部特征，即身体背对相机转了180°；②身体完全无动画（当前 RefPoseLower 固定姿势）。\n\n【任务】A路：FP 身体渲染+动画还原。\n1. 先诊断反向根因：检查 range/src/visual/range_body.js 当前组件链（CharacterRoot→CharacterMesh0→FPPMesh→FPPMeshLowerBody）的 yaw 处理，对照 asset_usage_mechanism.md 的 3P容器Yaw=-90°实证值与 GLB 已含坐标基转换的事实。修复到低头看见的是腿前侧/膝盖/脚尖朝前。\n2. 身体动画：调查 extracted/ 已有数据能否驱动真实下半身动画——anim_json_3p/（3P动画）、fp_lowerbody_animbp.md 记载的 CopyPose/BlendListByBool 链、charbody_3p 资产。能实现就实现（站立/走路/蹲/趴的下半身随动）；不能实现就在报告里写清卡在哪个数据缺口（三档标注），禁止伪造动画。\n3. 守住上一版正确成果：非破坏性 Lower mesh 选择、不重复套 CDO 变换、不继承相机 pitch。\n\n【硬约束】只用游戏内数据；缺数据标【未找到】+搜索记录；三档标注；游戏目录 D:\\Delta Force 只读不启动；改码后 cd range && npm test 全绿；不跑 vite build；临时文件用完清理；截图/无头浏览器自备 4530+ 临时端口，禁占 4173/4521/4522；与其他四路并行，只许改 range_body.js 及你新增的模块，main.js 改动必须最小化。\n\n【交付】\n1. 报告 extracted/logs/impl_fpbody_anim_v2.md（UTF-8）\n2. 硬门槛（动画类，按 MISSION 文档验收标准）：\n   a. 方向证明：身体 forward 向量与相机 forward 的数值对照 + 低头帧截图（须能辨认脚尖/膝盖朝前）\n   b. 若实现动画：站立/走路/蹲 各 6 帧等距时间轴序列图 + Hips/双腿关键骨采样点运行时值 vs extracted 动画 JSON 源值对照表（最大误差 mm/deg）\n   c. 若未实现动画：数据缺口清单（哪个环节缺什么，试过什么路径）\n3. 改动文件清单\n\n【完成定义】报告落地+门槛产物齐+npm test 绿。",
+  "reasoning_effort": "max"
+}

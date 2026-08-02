@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：ABP_LowerBodyFor1P_3P 下半身动画蓝图解析（续跑——导出已完成，直接解析）。\n背景：前一棒（luna）已完成资产定位与导出，死于 API 503。**导出产物已就绪：`extracted/dump_anim_probe/lowerbody_target/*.json`**（ABP_LowerBodyFor1P_3P 的完整 uasset dump）。已看到的线索：含 AnimGraphNode_ModifyBone 多枚、TransitionResult、RotationOffsetBlendSpace、SupineAO（AO_AR_M_3P_Supine_For1P）等。\n任务（不要再重复导出，直接读 lowerbody_target 的 JSON）：\n1) 解析 AnimGraph 节点图：状态机结构（BakedStateMachines/States/Transitions）、ModifyBone 改了哪些骨/什么值、LayeredBoneBlend 或 section mask（下半身如何与上身分层）、BlendSpace/AimOffset 引用清单；\n2) 列出它引用的全部动画序列/BlendSpace 资产路径（如 BS_AR_3P_SupineMove_For1P、AO_AR_M_3P_Supine_For1P 这类 For1P 资产），grep extracted/asset_list_full_20260731.txt 补全清单并标注在哪个 pak；\n3) pitch 分配逻辑：找 Pitch/AimOffset/RotationOffset 相关节点与曲线（如 ForbidAO 曲线）；\n4) 产出报告：AnimBP 结构全解 + 对 range/ 前端 1P 身体渲染的指导结论（下半身该播什么、怎么分层、pitch 怎么处理）。\n产出：extracted/logs/fp_lowerbody_animbp.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-terra）。\n纪律：只许写该报告，禁止改 range/；只用游戏内数据；找不到写「未找到」+搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到。参考 extracted/logs/fp_body_mesh_source.md。"
+}

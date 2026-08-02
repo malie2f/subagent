@@ -1,0 +1,9 @@
+{
+ "runtime": "kimi",
+ "model": "kimi-code/kimi-for-coding",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 2400,
+ "wait": false,
+ "task": "你是逆向工程团队的机制分析师。项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链），直接开工，禁止反问。\n\n【背景问题】我们把游戏 3P 角色动画（C_Test_001_3P 骨架的 WalkF/JogF/Idle 等剪辑）重定向后放进 Web 靶场，数值校验全对，但游戏内渲染出来身体朝向反转 180°。怀疑不是动画数据错，而是\"游戏运行时如何使用这些资产\"的机制没搞对（AnimBP 状态机、mesh 组件 attach、root motion 处理、是否有运行时 yaw 桥接）。用户铁律：必须先逆向出游戏原生的资产使用机制，拿到 dump 证据，禁止靠坐标系推理猜。\n\n【任务】产出 extracted/logs/asset_usage_mechanism.md（中文），回答：\n1. 游戏 3P 角色：角色 mesh 组件挂在哪个父节点/ socket 下？AnimBlueprint（或动画状态机资产）怎么引用 WalkF/JogF/Idle 剪辑？有没有运行时朝向修正（yaw offset / root motion 选项 / OrientRotationToMovement 类标志）？在 extracted/charbody_3p/ 和相关 dump JSON 里找证据（资产字段、引用路径）。\n2. 动画剪辑的 Root 骨位移（如 WalkF Root 前进 +303cm）游戏是当 root motion 驱动位移，还是 in-place 由移动组件驱动？找 dump 里的 root motion 标志字段。\n3. 1P 视模：手臂 mesh 与枪 mesh 的挂载链（我们已有 extracted/logs/weapon_attach_mechanism.md 证 b_IK_Gun，置信 0.97——复核它，并补充手臂侧：手臂动画剪辑如何与枪动画同步、Camera_Joint 如何被相机驱动）。已知数据在 extracted/ 下的 weapon/character dump。\n4. 结论必须明确回答：我们重定向后的 3P 动画要在 Web 端正确显示，运行时应该施加什么变换（或不施加），依据是哪条 dump 证据。\n\n【方法】先读 extracted/logs/body_3p_anim_reverse.md、animextract_3p_report.json、body_3p_anim_manifest.json、weapon_attach_mechanism.md 了解现状，再去原始 dump 找机制证据。需要重新解包可用 tools/DFExtract（密钥集已内置，游戏目录只读）。\n\n【纪律】只许在 extracted/logs/ 下写报告，禁止改动 range/ 和游戏目录。每个结论标注证据（文件路径+字段）和置信度（实证/推断）。"
+}

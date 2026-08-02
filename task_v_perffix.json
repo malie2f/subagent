@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "timeout_sec": 3600,
+ "wait": false,
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "reasoning_effort": "max",
+ "task": "【性能长帧诊断+修复攻坚】先读 docs/MISSION_20260801.md（第〇原则：先根因后修，不许盲修）、extracted/logs/impl_perf_warmup.md（§4 实测数据）、extracted/logs/audit_perf.md。背景：预热实装已验收（programs 零新增 5/5 PASS），但首次技能帧<20ms 硬指标 0/5 FAIL：冰爆 firstSkill mean=26.8ms/p95=55.3ms/542帧>20ms（持续性重负载=机制问题，不是单帧突刺）、露娜侦察箭 max=305.3ms（单帧长任务）、红狼三连 max=90.4ms、手雷温雷 max=34.3ms、赤枭 20.9ms。探针基线 JSON：extracted/logs/impl_perf_accept_20260801/perf_probe.json，探针脚本 range/scripts/perf_warmup_accept_20260801.mjs 可复用。任务：①先诊断后修——用 CDP Performance 域/PerformanceObserver longtask/手工插桩拿到长帧归因证据（粒子更新循环？burst 分配？GLB/材质首次构建？主线程 JSON？GC？），报告里每条归因必须有 profile 证据，不许猜；②按归因做机制级修复（如粒子池化/更新循环优化/延迟构建前移 warmup），修数值=改生成器，禁手改 range/src/data/*.js（skill_warmup_manifest.js 手写清单除外）；③修后复测同口径：冰爆 firstSkill mean/p95 与四个场景的 max 都要对比基线，目标 firstSkill 全部<20ms，达不到就诚实写差距与下一步；④运行时复核：dev 页面不再出现“持枪视模加载失败 SyntaxError: Unexpected token <”（gun_view.js 资产基座已改部署无关，验证 events 里该错误消失且 1P 视模正常加载）；⑤cd range && npm test 绿；⑥写报告 extracted/logs/fix_perf_longframe.md（根因+profile 证据+修复+前后数据对照），署名 kimi。环境：apply_patch 必须 *** End Patch 结尾；rg 只扫具体子目录勿扫 extracted/ 根；删文件用 bash rm；单条命令 25 秒内；探针端口 vite 4566+CDP 9566 用完杀；别碰 4173/4521/4522/8765；游戏目录只读；不许回滚特效r5/弓r5 的机制修复。"
+}

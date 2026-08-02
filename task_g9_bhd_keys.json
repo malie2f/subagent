@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【九轮·BHD 密钥攻坚第二轮】请以最高思考档位运行。产出报告 extracted/logs/bhd_key_hunt2.md。\n\n背景：三角洲行动逆向。八轮新发现全客户端唯一真锁：D:\\Delta Force\\Delta Force\\BlackHawkDown\\BHD\\Content\\Paks\\pakchunk0-WindowsClient.pak（23.7GB，UE4 pak v11，index AES 加密，270 条公开密钥 0 命中）。BHD 是独立战役客户端（黑鹰坠落）。已知：BHDClient-Win64-Shipping.exe（250.6MB）加壳虚拟化（523 随机节区名、熵 7.994，八轮实证）；公开密钥源（GitHub HanKongXingYu/DeltaForce_Unpacking）仍 2026-05-10 版无更新。\n\n任务：\n1. **BHDClient-Win64-ShippingBase.dll（34MB）深扫**：八轮只做了浅扫（无 64-hex/无 key 字符串）。本轮做完整 PE 分析：节区表（是否也加壳）、熵分布、导入表、若未加壳则全量字符串+64-hex 候选提取并对 pakchunk0 实测（DFExtract 支持 --keys 追加自定义密钥 JSON，构造候选密钥文件试挂载）\n2. **BHD/Saved 运行时残留**：翻 D:\\Delta Force\\Delta Force\\BlackHawkDown\\BHD\\Saved\\ 下的日志/崩溃报告/配置残留，找 key 线索（只读）\n3. **全网 hunt 第二轮**：黑鹰坠落/BHD/BlackHawkDown AES key——cs.rin.ru（Steam 破解版社区的 rin 常有 key 帖）、forums.gildor.org、GitHub 全量搜、模之屋/中文社区、reddit r/DeltaForceGlobal。用户已授权联网找密钥\n4. **旁路**：BHD pak 是否与主线 pak 共用 GUID 加密（把主线 121 pak 的密钥 GUID 与 BHD footer 的 EncryptionKeyGUID 比对——若同 GUID 则只是 key 未公开，若不同则独立体系）\n产出：候选密钥试挂记录（每条候选+结果）、Saved 残留发现、全网检索记录、GUID 比对结论。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll list <pak目录> --keys <候选密钥json> --oodle oo2core_8_win64.dll --out <out>；ARM64/PE 分析可用 tools/arm64env/Scripts/python.exe（capstone+pyelftools，也可 pip 装 pefile 到该 venv）。\n纪律：游戏目录只读；不启动游戏（尤其 BHD 客户端）；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；找不到写未找到+完整检索记录。脚本写 tools/。"
+}

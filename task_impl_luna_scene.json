@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 7200,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【实装·场景域】请以最高思考档位（max）运行。产出报告 extracted/logs/impl_scene_rebuild.md。\n\n背景：三角洲行动逆向项目，靶场前端在 range/（Three.js+Vite），用户已授权你实装。现有靶场场景是程序化搭建，用户不满意。**本任务：按游戏官方靶场布局重建场景**。\n\n数据（全部已逆向落盘，禁止编造布局）：\n- 官方布局：extracted/scene_assets/safehouse_range_layout.json + .csv（SafeHouse_Range.umap 的 222 个 StaticMeshActor 摆放记录：mesh 引用、位置 cm、旋转 度、缩放、父挂；坐标范围 X -12585~1839、Y -17864~-2203、Z -20048~-19595 cm）。\n- 资产：extracted/scene_assets/ 下 29 GLB+328 PNG（manifest.json 索引），含靶场专用件（ShootRange_Shield/TargetRail/Partition/Target/Table/Screen/Gate）、集装箱、掩体、水泥墙/地板。\n- 坐标换算：UE 左手系 cm→Three.js 右手系 m 的既定公式在 HANDOFF.md 硬知识区（必读）；贴图通道排布（MRA/MAC/NCE 规约）也在 HANDOFF.md。\n- 背景报告：extracted/logs/scene_container_assets.md（必读，含布局字段语义与范围界定）。\n\n要求：\n1. 按 222 条官方布局重建靶场主体（挡板/靶轨/隔断/靶子/桌/屏/门按官方位置摆），布局里没有的地面/围墙/天花板用已导出的 floor/wall 模块或集装箱/掩体资产补齐——补齐部分属于推断，在代码注释与报告里标注「非官方布局，为可玩性补齐」。\n2. 用户硬性要求：**不设置空气墙**，用实体资产做阻挡，且**留有可通行位置**（不要把场景封死）。\n3. 靶子：官方布局里有 ShootRange_Target/TargetRail（靶轨 9 条），把可射击靶子接到现有命中/计分系统上（读现有靶场命中判定代码，保持接口）。\n4. 材质：按 HANDOFF.md 通道规约重建 PBR（MRA R/B 交换喂 ORM 等），BC7 已解码的 PNG 直接用。\n5. 性能：222 件场景件+贴图，做实例化/合并（同 mesh 42 个挡板这类必须 InstancedMesh 或合并），保证 1080p 流畅。\n\n边界：只改 range/ 场景相关文件（场景构建/材质/灯光）+range/public 场景资产目录；**不碰角色渲染、武器动画、技能/特效系统、枪械数据、入口文件、vite.config**；不跑 vite build（kimi 统一构建）；vite dev 在 127.0.0.1:4173 跑着（热更新）可即时验证。游戏目录只读，不启动游戏。\n自测：改完确认 vite dev 编译无错、4173 场景渲染正常、靶子可射击计分、无空气墙且有通行位。报告写中文；**先写一行中文测试，若变问号则整份写英文**（九轮 luna 出过中文全丢事故）。"
+}

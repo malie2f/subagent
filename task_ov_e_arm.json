@@ -1,0 +1,9 @@
+{
+  "runtime": "opencode",
+  "model": "deepseek/deepseek-v4-flash",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 7200,
+  "wait": false,
+  "task": "【项目】三角洲行动逆向+Web靶场。开工前必读（按序）： ｜ 1. docs/README.md（铁律+阅读清单） ｜ 2. docs/PROJECT_STRUCTURE.md（range/ 模块地图） ｜ 3. docs/CONVENTIONS.md（工程纪律） ｜ 4. docs/MISSION_20260801.md（本轮任务总书，你是 E 路） ｜ 5. 专项：extracted/logs/viewmodel_render_mechanism.md（视模渲染/手臂范围：WeaponViewParamTable 全表语义+逐武器ViewId清单+§3.3关键纠正）、fpbody_render_mechanism.md（手臂占比8层链：FPP_FOV=90/IdleWeaponFov=85/AimWeaponFov/IdleCamOffset/AimCamOffset/FOV曲线/socket/瞄具FovForWeapon/枪×镜LayoutOffsetWPS）、asset_usage_mechanism.md ｜ 【用户要求】手臂展示范围还原。用户给的参考：游戏内仅展示当前靶场手臂的约 1/2，基本看不见右手——**这只是参考不是游戏数据**，必须找到游戏数据并按数据还原。用户强调这与身体渲染有关（手臂露多了说明视模锚点/FOV 链不对）。 ｜ 【任务】E路：手臂展示范围还原。 ｜ 1. 审计现状：range 当前持枪视模（visual/gun_view.js、visual/viewmodel_anchor.js、相机/武器 FOV 链）实际参数——手臂 rig 挂相机的方式、相机 FOV、武器 FOV、锚点偏移。 ｜ 2. 对照游戏数据链：FPP_FOV（默认 90）、WeaponViewParamTable 的 IdleWeaponFov/AimWeaponFov、IdleCamOffset/AimCamOffset、逐武器 ViewId。算出应用内应取值，列出当前值 vs 应取值差异。 ｜ 3. 按数据实装修复。数据链里哪一环缺就标【未找到】+搜索记录，缺的环节禁止编造；用数据支持的最近方案并在报告写明依据。 ｜ 4. 注意与身体渲染的耦合：手臂 rig/身体 rig 都挂相机链，改 FOV/锚点时验证身体（range_body.js 渲染的下半身）不自相矛盾（如手臂位置变了身体没跟上）。身体本体由另一路代理负责，你只负责手臂/视模侧，发现耦合问题写进报告。 ｜ 【硬约束】只用游戏内数据；三档标注；游戏目录只读不启动；改码后 cd range && npm test 全绿；不跑 vite build；临时文件清理；无头浏览器自备 4530+ 端口，禁占 4173/4521/4522；与其他四路并行，只许改 gun_view.js/viewmodel_anchor.js/grip_poses 生成源及你新增模块，main.js 改动最小化。 ｜ 【交付】 ｜ 1. 报告 extracted/logs/impl_arm_range.md（UTF-8） ｜ 2. 硬门槛： ｜ a. 参数对照表：相机 FOV/武器 FOV/锚点偏移 当前值 vs 游戏表应取值（≥3 把枪） ｜ b. 修复前后同枪同姿态截图对照（M7 站立持枪，手臂入镜范围差异须可辨认） ｜ c. 数据缺口清单（哪环缺数据、你的处理方案及依据） ｜ 3. 改动文件清单 ｜ 【完成定义】报告落地+门槛产物齐+npm test 绿。",
+  "reasoning_effort": "max"
+}

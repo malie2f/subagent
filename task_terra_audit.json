@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 2400,
+ "wait": false,
+ "task": "你是逆向工程团队的审计员。项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n\n【背景】团队铁律：一切动画/运动必须来自游戏内真实数据（解包/dump 转换而来），禁止手搓补全。用户怀疑大量动作仍是编造的，要求一次彻底审计。前一个模型没读任务书就问\"要审计什么\"然后退出了——任务书就是下面全部内容，直接开工，禁止反问。\n\n【任务】对 range/ 前端做全量动画真实性审计，产出 extracted/logs/anim_authenticity_audit.md（中文）。\n\n审计范围（逐一覆盖，不许抽样跳过）：\n1. range/src/visual/ 下全部运动相关文件：gun_view.js, melee_view.js, bow_view.js, range_body.js, melee_anims.js, gun_anims.js, knife_anims.js, skills.js, skill_fx.js, fire_fx.js, scope_pip.js，以及换弹/手势/姿态/歪头/跳跃/趴下相关代码。\n2. range/src/ 的移动/姿态/相机逻辑（main.js、姿态系统）。\n3. range/public/anims/ 下全部 JSON 数据包。\n\n对每一处运动源分类（表格，列：系统 | 文件:行号 | 运动内容 | 类别 | 证据）：\n- A类=真实游戏剪辑（引用 extracted 转换产物 JSON，且该 JSON 存在、字段被实际消费）\n- B类=真实游戏参数（时长/幅度/曲线来自 dump 字段，注明 dump 出处）\n- C类=手搓/编造（sin/cos 摇摆、硬编码角度/时长、目测估值、\"近似\"注释）\n\n必须回答的专项问题：\na) range/public/anims/ 里哪些 JSON 存在但运行时从未加载？哪些被加载但部分剪辑从未播放？\nb) 哪些代码路径声称数据驱动，实际有静默回退到手搓值（fallback/default/?? 0.x 之类）？逐个列 file:line。\nc) 枪械后坐力/枪身抖动/呼吸晃动的数据源各是什么类别？\nd) 近战（刀）攻击动画哪些是真实剪辑、哪些是手搓？\n\n【纪律】只许写 extracted/logs/anim_authenticity_audit.md，禁止改动任何其他文件。报告里每个 C 类条目必须给 file:line 证据。完成后在结尾给出 C 类条目总数统计。"
+}

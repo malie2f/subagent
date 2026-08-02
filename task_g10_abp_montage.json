@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【十轮·动画绑定机制数据面（ABP/Montage/Blend）】请以最高思考档位运行。产出报告 extracted/logs/anim_binding_mechanism.md。\n\n背景：三角洲行动逆向。动画资产本体已全部转出（36 族/40 枪/138 剪辑+21 条 PerTrack 转换），但**动画的使用机制**是本项目从立项到现在的翻车高发区：持枪错位、开镜枪械翻转、换弹弹匣不动、奔跑抽搐、刀攻击段界错误——全部指向「游戏如何绑定/混合/调度动画」这一层数据没被系统挖过。本任务把这一层数据面彻底挖穿，为通用动画处理方案供数据。\n\n要挖的东西（全部在 pak 数据面，禁止编）：\n1. 武器侧：AnimBlueprint/AnimMontage 资产清单与结构——Montage 的 Slot 名、Section 段界、BlendIn/BlendOut 时间、CompositeTimeScale；人物 1P 动画蓝图里武器段与人物段的同步机制（同帧起播？通知事件？）；\n2. 换弹链：弹匣段的挂载/卸载时机由什么驱动（AnimNotify？Curves？）——magSeat 父挂机制已知（蒙皮权重 0），要找的是时机数据源；\n3. 混合参数：姿态过渡（站/蹲/趴/奔跑/歪头）的 Blend 时长与曲线资产（已知 FSM 0.30/0.45/0.35s 分层，找动画侧 Blend 时间轴）；开镜期间动画层（Additive？Layered blend per bone？）的配置证据；\n4. 刀/近战：Montage 段界与 ComboData 的权威对应关系（已知挽歌 4 段 vs ComboData 3 段），段切换由什么字段驱动；\n5. 产出一份「通用动画使用方案数据包」：把上面挖到的每类机制写成结构化 JSON（extracted/anim_binding/），含来源资产路径与字段证据。\n方法：DFExtract dump 把 AnimBlueprint/AnimMontage uasset 序列化成 JSON 看字段；搜 asset_list 里 Anim/ABP/Montage 相关包；参考已 dump 的 extracted/parsed/ 与 extracted/dump_tables/。\n成功标准：上面 5 项每项给出实证字段/未找到定案；数据包落 extracted/anim_binding/。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump/list \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...；资产清单 extracted/asset_list_gamedir_20260731.txt。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；脚本写 tools/。报告写中文（若你的 CLI 写入中文会丢失，用英文写，禁止写成问号乱码）。"
+}

@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 7200,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【实装返工·场景域视觉质量】请以最高思考档位（max）运行。产出报告 extracted/logs/impl_scene_rebuild_v2.md。\n\n背景：你（或上一棒）按官方布局重建了靶场（报告 extracted/logs/impl_scene_rebuild.md，代码 range/src/visual/range_layout.js/range_materials.js/range_env.js/range_props.js）。功能验收过了（222 记录/实例化/无空气墙/计分链路），但**视觉验收打回**：实机截图 extracted/logs/scene_rebuild_final.png 里玩家相机被巨大的交错白色板块/几何体吞没，地面是破碎条纹，整个场景是一团乱几何，完全不可玩。先看这张截图再动手。\n\n疑似根因方向（自己诊断，不限于这些）：\n1. 157 条未导出记录的代理几何尺寸/位置错误——代理盒子的尺寸来源若是布局记录的 scale 而非 mesh 真实包围盒，可能做出几十米的巨墙；\n2. 玩家出生点落在场景几何内部（出生点应参考官方布局里 ShootRange_Table（射击台×3）后方/挡板列的射手位）；\n3. 补齐的 floor/wall 模块（SM_Miniworld_floor_04 尺寸 8×12m、CementWall 71×45×88m！）——CementWall 是 71×88 米的巨物，直接当普通墙用必然吞掉场景，检查它的缩放与摆放；\n4. 官方布局 Z 范围 -20048~-19595cm（地下 200 米？）——检查展示原点/轴向换算后场景是否压在玩家头上或脚下。\n\n返工要求：\n1. 玩家出生点：在射击位（射击台后方，面向靶子方向），出生时视锥内不得有任何几何穿插；前方射击廊道必须干净直通靶排。\n2. 代理几何：每条代理的尺寸必须有 sanity clamp——以同族已导出 GLB 的真实尺寸为参照（挡板~2m、靶轨 2.56m、桌~1.5m），超出合理范围的代理直接不渲染并在 userData 标记，宁可少摆不可吞场景。\n3. CementWall 类巨型模块：按真实尺寸语义使用（它是建筑级外墙，不是室内隔断），缩放或替换，禁止原尺寸怼进靶场。\n4. 场景观感对齐：靶场=室内射击场，一条射击廊道+两侧挡板工位+远端靶排+靶轨。参考布局记录的疏密分布（42 挡板应该是工位隔断阵列）。\n5. 产出**三张验收截图**（headless 渲染，1920×1080）：a) 出生点 FPS 视角望向靶排；b) 顶视正交全景（能看到 222 件布局全貌）；c) 侧视。存 extracted/logs/scene_rebuild_v2_{fps,top,side}.png。截图是你自验的硬门槛——自己先看，乱就继续改，不要交乱的。\n6. 保持已验收的功能不变：222 记录入链、InstancedMesh、无空气墙+4m 通行口、官方靶子命中/计分、材质通道规约。npm test 必须保持通过。\n\n边界：只改 range/ 场景相关文件；不碰角色渲染、武器动画、技能/特效、枪械数据、入口、vite.config；不跑 vite build；vite dev 在 127.0.0.1:4173 可热更验证；游戏目录只读，不启动游戏。报告写中文；先写一行中文测试，变问号就整份写英文。"
+}

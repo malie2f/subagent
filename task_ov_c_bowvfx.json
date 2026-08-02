@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 7200,
+  "wait": false,
+  "task": "【项目】三角洲行动逆向+Web靶场。开工前必读（按序）：\n1. docs/README.md（铁律+阅读清单）\n2. docs/PROJECT_STRUCTURE.md（range/ 模块地图）\n3. docs/CONVENTIONS.md（工程纪律）\n4. docs/MISSION_20260801.md（本轮任务总书，你是 C 路）\n5. 专项：extracted/logs/fix_grenade_cook_lag.md（上一版温雷修复报告——用户实机验证无效，先搞清为什么假胜利）、impl_operator_vfx.md（特效实装验收）、fx_special_reverse.md、skill_mechanism.md\n\n【用户实机打回症状（3 个，同一域）】\n①弓脱手：露娜弓播放动画时弓脱离手部；②技能特效消失：特效完全不显示（怀疑上一版 Cascade 预热改动把 spawn 路径弄断，或资产路径/引用错误）；③温雷卡顿依旧：上一版 headless node 合成基准显示 -16.6%，但用户实机按住温雷还是卡——合成基准是假证据。\n\n【任务】C路：弓/雷/技能特效域修复。\n1. 弓脱手：检查 bow_view.js 的 boneMount/Weapon_RightHand_Joint 挂载在动画播放时的变换链，对照 melee_view.js 正常刀的挂载（同范式），修复到动画全程弓不离手。\n2. 特效消失：核实 cascade_vfx.js 预热改动后 spawn() 运行时路径是否断（compiledCache 未命中分支、纹理 ready promise 未 resolve、sentinel emitter 残留态等）；核对 operator_vfx/ 资产路径经 assetUrl() 后的实际 URL 是否 200（dev 经 4521 代理、dist_probe 经 4522 直链两种部署都要验证）。修复并保证 5 干员特效链完整。\n3. 温雷卡顿真因：必须用**真实浏览器页面**（127.0.0.1:4173 dev 或 dist_probe）CDP/rAF 帧时采样定位：温雷前/温雷中各 ≥300 帧，给平均值+P95，找到真正吃帧的调用栈（渲染提交/材质编译/GC/粒子更新/预览线绘制），对症修复后再用同样方法实测对比。禁止用 node 合成基准当唯一证据。\n\n【硬约束】只用游戏内数据；三档标注；游戏目录只读不启动；改码后 cd range && npm test 全绿；不跑 vite build；临时文件清理；无头浏览器自备 4530+ 端口，禁占 4173/4521/4522（截图脚本随用随杀）；与其他四路并行，只许改 bow_view.js/skills.js/cascade_vfx.js/skill_fx.js 及你新增的模块，main.js 改动最小化；skills.js 里 assetUrl() 子路径部署逻辑禁止回退。\n\n【交付】\n1. 报告 extracted/logs/fix_bow_grenade_vfx.md（UTF-8）\n2. 硬门槛：\n   a. 弓动画 6 帧等距时间轴序列（拉弓/放箭全程弓在手）+ 弓骨相对手骨的位移数值（脱手修复前后对比）\n   b. 特效修复后至少 2 个干员技能释放瞬间截图（特效可见）+ 资产 URL 200 验证清单（两种部署）\n   c. 温雷真浏览器帧时：修复前/后对照表（平均+P95，各≥300帧）+ 真凶调用栈说明\n3. 改动文件清单\n\n【完成定义】报告落地+门槛产物齐+npm test 绿。",
+  "reasoning_effort": "max"
+}

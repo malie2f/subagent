@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【十轮·第一人称身体渲染机制数据面】请以最高思考档位运行。产出报告 extracted/logs/fpbody_render_mechanism.md。\n\n背景：三角洲行动逆向。干员身体渲染是用户反复点名的翻车区：游戏内低头可见腿部，我们的靶场身体渲染反过来了/腿部面筋/穿模。前序轮次挖过移动配置（movement_config_mining.md，蹲眼高 102.5cm 等），但**身体渲染机制本身的数据面没挖穿**：1P 身体用哪个 mesh/骨骼、相机挂哪根骨、手臂显示范围由什么决定、低头时身体如何裁剪。\n\n任务（全部 pak 数据面，禁止编）：\n1. 1P 身体资产链：人物 1P mesh（手臂+腿+躯干）的骨骼资产、蒙皮、与 3P mesh 的关系（同骨架？裁剪版？）；CharacterMesh 配置表/CDO 里 1P 身体字段；\n2. 相机挂点：1P 相机挂哪根骨骼/socket（找相机 socket 定义或相机蓝图 CDO）；眼高与骨骼的关系（102.5cm 蹲眼高对应哪根骨的位移）；\n3. 手臂显示范围：游戏内手臂在画面中的占比由什么决定——FOV（已知 FPP_FOV=90）+ 手臂 mesh 的挂点偏移（找 1P 手臂挂点/偏移配置字段，如 Mesh1P 相对相机的 transform）；是否有逐武器/逐握持的手臂偏移表；\n4. 低头可见腿的机制：是全身 1P mesh 始终渲染，还是低头时切换/开启腿部渲染？找相关字段（bRenderLegs/FullBody/ShadowOnly 类布尔或枚举）；\n5. 产出数据包 extracted/fpbody_render/：骨骼结构 JSON+相机挂点+手臂偏移字段+相关 CDO/表行证据。\n成功标准：4 个机制问题每个给出实证字段或「未找到」定案；数据包落盘。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump/list \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...；资产清单 extracted/asset_list_gamedir_20260731.txt；已 dump 表在 extracted/parsed/ 与 extracted/dump_tables/（先搜已有再导新的）。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；脚本写 tools/。报告写中文（若你的 CLI 写入中文会丢失，用英文写，禁止写成问号乱码——九轮 luna 报告中文全丢成问号，务必先写一行中文测试，丢字就整份写英文）。"
+}

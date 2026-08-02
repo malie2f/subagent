@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【九轮·人物移动/姿态配置数据】请以最高思考档位运行。产出报告 extracted/logs/movement_config_mining.md。\n\n背景：三角洲行动逆向。用户要求人物移动「无论是速度动作还是视角，都按照游戏内的来」：站/蹲/趴/歪头/跳跃/奔跑的移动速度、视角高度、姿态切换过渡时长、歪头角度与速度。当前靶场这些值若不是来自游戏数据就是不合规。另有用户报告：蹲下时人物双手直接分开（疑似蹲姿动画/过渡数据缺失）、奔跑时手臂显示范围与游戏不符。\n\n任务（全部从 pak 数据回答）：\n1. **移动速度表**：站走/奔跑/蹲走/趴移/开镜移动的逐档速度值——找 Character/Movement/Attribute 相关 DataTable 或角色蓝图 CDO（GPCharacterMovement 类结构，手游 dump 有同名结构可对照 extracted/logs/mobile_dump_mining.md）\n2. **视角/相机高度**：站/蹲/趴的相机高度、姿态切换过渡时长/曲线\n3. **歪头（lean）**：角度、速度、是否分段\n4. **跳跃**：初速/重力缩放/滞空参数\n5. **姿态切换动画**：站↔蹲↔趴的过渡动画资产与时长（蹲姿双手分开 bug 的数据侧核查：蹲姿动画是否存在、骨骼轨道是否完整）\n产出：extracted/movement_config/ 机器可读 JSON + 报告（逐参数给表路径+字段+值）。\n\n方法：先 ls extracted/dump_tables/ 盘点；在 extracted/asset_list_gamedir_20260731.txt grep 候选（Movement/Character/Attribute/Camera/Pose）；角色 CDO dump 方法参考 pak_cdo_treasure.md（它 dump 过 7 个角色蓝图 CDO）。工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；找不到写未找到+检索记录。脚本写 tools/。"
+}

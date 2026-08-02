@@ -1,0 +1,9 @@
+{
+  "runtime": "kimi",
+  "model": "kimi-code/kimi-for-coding",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项（工程+逆向）：改造 DFExtract 序列化 UE Socket，拿到 10 枪照门 socket 真值并复算机瞄眼距。\n背景：ironsight_eye_relief_round2.md 定案——DFExtract 对 SkeletalMesh 只写 GLB，丢失 UE Sockets 元数据；9 枪 mesh 已导出但 0 命中照门节点。两条线索都要查：\nA) **工具改造**：tools/DFExtract.cs 是源码（tools/rebuild/DFExtract.csproj 可重建；现有产物 tools/app/DFExtract_fixed.dll）。CUE4Parse 的 USkeletalMesh 有 Sockets 属性、USkeleton 也有 Sockets。给 DFExtract 增加 socket 序列化（对 SkeletalMesh/Skeleton 导出 JSON 含全部 socket：名称/父骨/相对 TRS），dotnet build 重建后重新导出 10 枪（M7=Rec_AR_MCX_044/M4A1/AWM=Rec_SR_AW_052/SR25/M14/M250=XM250_056/M249=Minimi_042/ASh-12/ASVal=Rec_DMR_VSS_041/AKM 若无主 mesh 则记录）。构建遇依赖问题就读 tools/rebuild/ 和 tools/app/*.deps.json 解决。\nB) **机瞄独立配件假说**：用户证实游戏有\"默认机械瞄具\"。grep parsed/ 的 Sco/瞄具表和 gunsmith 数据找铁瞄配件行（名含 Iron/机瞄/Mechanical/照门），查 default_sights.json（extracted 根目录，build_default_sights.py 产物）——若机瞄是配件，眼距基准点在配件 mesh 上。\nC) 拿到 socket 后按 ironsight_eye_relief.md §2 口径（AimIdle frame0 + Camera_Joint+ModifyBone(0,5,10)cm）逐枪复算照门→相机距离/偏移。\n产出：眼距真值表（多少枪出多少）+ socket 全清单 + 工具改造说明。\n\n产出：extracted/logs/ironsight_socket_round3.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 k3(kimi-code/kimi-for-coding)）。\n\n纪律（违反=废品）：\n- 只许写你负责的那一份报告到 extracted/logs/ + 任务必需的导出产物/工具改造（限 tools/ 和 extracted/），禁止改 range/\n- 只用游戏内数据；找不到写「未找到」+ 搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到\n- 游戏目录只读禁止启动/写入；副本 D:/df_pak_copy 只读\n- 全量资产清单 extracted/asset_list_full_20260731.txt（142,554 条，先 grep 再导出）；工具链 cd tools/app && dotnet DFExtract_fixed.dll list|export ...（参考 extracted/logs/ironsight_eye_relief_round2.md §1.2 的命令先例）\n- 参考 extracted/logs/MECHANISMS_INDEX.md 与既有报告，不重复挖"
+}

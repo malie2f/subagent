@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【十轮·PP19 Fire_rec 单资产攻坚】请以最高思考档位运行。产出报告 extracted/logs/pp19_fire_rec_crack.md。\n\n背景：三角洲行动逆向。武器动画资产面已闭合到只剩 3 个真空，你是其中之一：PP19（勇士冲锋枪）的 Fire_rec（开火后坐段）在九轮非 ACL 攻坚中被鉴定为「绑定了 ACL settings 但压缩流为空」（详见 extracted/logs/non_acl_anim_crack.md 结论与 extracted/logs/weapon_anim_fill_*.md）。同族其他段是否也存在、空流是导出端问题还是资产本身为空，未定论。\n\n任务：\n1. 复核 non_acl_anim_crack.md 的 PP19 Fire_rec 条目，定位该 uasset 全路径与所在 pak；\n2. 用 DFExtract dump 子命令序列化该 uasset 为 JSON，确认 CompressedDataStructure/压缩流字段的真实状态（真空流 vs 解析器丢流）；\n3. 检查同族 PP19 全部动画段清单（Fire/Fire_rec/GetWeaponInitial/换弹各段），确认哪些段有数据哪些空；\n4. 若确认资产本身为空：在 asset_list 里检索 PP19 是否有替代段（其他目录/补丁 pak/Dolphin 热更 pak 里的同名或新版段）；若确认是解析器丢流：修复或绕过解析器把这段转出来（与 anim_json_weapon 同构 JSON+refpose 自检）。\n成功标准：PP19 Fire_rec 要么转出同构 JSON，要么给出「资产本身为空」的字节级证据+替代段检索结论。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump/list \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...；资产清单 extracted/asset_list_gamedir_20260731.txt；九轮工具 tools/AnimExtractPerTrack 可复用；必读 extracted/logs/non_acl_anim_crack.md 与 extracted/logs/weapon_anim_reverse.md §4。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；脚本写 tools/。报告写中文（若你的 CLI 写入中文会丢失，用英文写，禁止写成问号乱码）。"
+}

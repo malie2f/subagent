@@ -1,0 +1,9 @@
+{
+  "runtime": "kimi",
+  "model": "kimi-code/kimi-for-coding",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项（形态追踪）：22 个「pak 内无独立资产」瞄具的 cooked 形态反查 + 液氮 2 被动补挖。\n背景 A：scope_lens_geometry_round2.md 定案 22 个 Sco_* mesh（Sco_4X_Leu-HAMR_002/Sco_10X_KMZ-1P69_006/Sco_Ho_Eot-EXPS3_003 等）在 142,554 全量清单精确检索 0 命中。但 gunsmith_data.js 的 parts[ItemId].mesh 字段记着这些名字——说明数据表引用了它们，资产应该以某种形态存在。\n任务 A：1) 先查这些 mesh 名的出处（grep extracted/parsed/ 全部 csv 和 dump_tables/ 找 Sco_4X_Leu-HAMR 等完整名字，确认引用字段和路径模板）；2) 在 asset_list_full_20260731.txt 里做变体检索：不带 _1P、带 _HD、不带 Sco_ 前缀（如 HAMR/1P69/EXPS3/EOT 关键词）、查 Textures/Materials 同名目录——定位它们的真实 cooked 路径；3) 找到就定向导出 GLB 补量镜片几何（口径同 scope_lens_geometry.md §1），找不到就给每个瞄具的完整搜索记录。\n背景 B：液氮 C405 的 3012010/3012011 两个被动在组合表行不存在（new_operators_skills.md §2）。\n任务 B：在新解锁的 dump（extracted/dump_new_operators_20260731/，389 个 JSON）和 parsed/ 全部 Skill/Buff 相关表里精确检索 3012010/3012011/C405 被动引用，能解则解。\n产出：A/B 两部分结论，全部证据级。\n\n产出：extracted/logs/scope_missing22_trace.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 k3(kimi-code/kimi-for-coding)）。\n\n纪律（违反=废品）：\n- 只许写你负责的那一份报告到 extracted/logs/ + 任务必需的导出产物/工具改造（限 tools/ 和 extracted/），禁止改 range/\n- 只用游戏内数据；找不到写「未找到」+ 搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到\n- 游戏目录只读禁止启动/写入；副本 D:/df_pak_copy 只读\n- 全量资产清单 extracted/asset_list_full_20260731.txt（142,554 条，先 grep 再导出）；工具链 cd tools/app && dotnet DFExtract_fixed.dll list|export ...（参考 extracted/logs/ironsight_eye_relief_round2.md §1.2 的命令先例）\n- 参考 extracted/logs/MECHANISMS_INDEX.md 与既有报告，不重复挖"
+}

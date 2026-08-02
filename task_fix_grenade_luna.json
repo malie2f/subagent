@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 7200,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【修复·温雷卡顿】请以最高思考档位运行。产出报告 extracted/logs/fix_grenade_cook_lag.md。\n\n背景：三角洲靶场（range/，Three.js+Vite），你之前完成了干员特效域实装（impl_operator_vfx.md）。用户实机验收报：**手雷温雷（按住拔环蓄力）就卡顿**。Cascade 特效实装后首次释放/持续释放时的性能问题没人验过。\n\n排查方向（不限于）：\n1. 温雷开始/进行中是否触发同步懒加载：粒子 JSON fetch、TextureLoader 加载 PNG、材质编译（shader compile hitch）——温雷是持续按住状态，若每帧或首次触发加载必卡；\n2. 温雷轨迹预测线/抛物线是否每帧重建几何/分配大量对象（GC 压力）；\n3. CascadeVfx.spawn() 的粒子系统是否每次重新解析 JSON+新建材质/几何（应缓存编译产物，runtime 已有 textureCache 的部分是否覆盖了全部路径）；\n4. 温雷期间的灯光/阴影更新（点光源投影重算）。\n修复原则：预加载（进靶场或选干员时就绪）、对象池、缓存编译产物、限制每帧分配。禁止为了性能砍特效参数——特效数值必须保持游戏原版数据。\n\n验收硬门槛：\n1. 用 headless 性能采样（performance.now 或 three renderer.info）给出温雷前/温雷中帧时对比数据，卡顿消除要有数字证据；\n2. npm test 保持全绿；\n3. 不得破坏：5 干员特效链、技能机制数值、图标 HUD（注意：skills.js 刚由我修过 assetUrl 子路径部署 bug，别回退这段）、场景文件、角色渲染。\n\n边界：只改 range/ 技能/特效/投掷物相关文件；不跑 vite build；vite dev 127.0.0.1:4173 可热更验证（4521 若被占改用 4522）；游戏目录只读不启动。报告写中文；先写一行中文测试，变问号就整份写英文。"
+}

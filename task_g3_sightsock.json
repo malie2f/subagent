@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：武器 sight socket 定向提取 + 机瞄眼距二轮复算。\n背景：ironsight_eye_relief.md 定案当前提取数据里没有任何照门/准星 socket（dump_mesh/ 只有 MCX 一份且无 Sockets 字段），10 枪眼距全标未找到。现在用 DFExtract 直接定向导出武器 1P SkeletalMesh 的完整 dump（含 Sockets）。\n任务：1) grep asset_list_full_20260731.txt 定位 10 枪的 1P SkeletalMesh 资产：M7(Rec_AR_MCX?)/M4A1/AKM/AWM(Rec_SR_AW?)/SR25/M14/M250(Xm250)/M249(Minimi)/ASh-12/ASVal——参考 refpose_weapon/ 的既有命名；2) 用 DFExtract export 导出这些 mesh 的 uasset JSON dump 到 extracted/dump_mesh/（assets.txt 列精确路径）；3) 从 dump 提取 FrontSight/RearSight/AimPoint/IronSight 类 socket（名称、父骨、相对变换）；4) 有 socket 的枪：按 ironsight_eye_relief.md §2 的口径（AimIdle frame0 + Camera_Joint+ModifyBone(0,5,10)cm）复算照门→相机距离与偏移；5) 产出逐枪眼距真值表。仍无 socket 的标未找到+该枪 mesh 的全部 socket 清单。\n\n产出：extracted/logs/ironsight_eye_relief_round2.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-terra）。\n\n纪律（违反=废品）：\n- 只许写你负责的那一份报告到 extracted/logs/ + 你需要的导出产物到 extracted/ 对应目录，禁止改 range/\n- 工具链：cd C:/Users/Lenovo/Documents/kimi/workspace/tools/app && dotnet DFExtract_fixed.dll list|export \"D:/df_pak_copy/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll [--filter a,b,c] [--out x] [--assets assets.txt]；全量资产清单已在 extracted/asset_list_full_20260731.txt（142554 条，先 grep 它再决定导出什么，不要盲导）\n- 只用游戏内数据；找不到写「未找到」+ 搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到\n- 游戏目录只读禁止启动/写入；副本 D:/df_pak_copy 只读\n- 参考 extracted/logs/MECHANISMS_INDEX.md 避免重复挖"
+}

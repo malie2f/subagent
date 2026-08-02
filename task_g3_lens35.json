@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：35 个「资产未提取」瞄具的 GLB 定向提取 + 镜片几何补量。\n背景：scope_lens_geometry.md §2 有 35 个瞄具标「资产未提取」（如 13110000001 HAMR、13110000003 KLE1P69），清单在该报告 §2 表格中；测量方法见该报告 §1（与 build_scope_lens.py 同口径：GLB 顶点、玻璃材质、min-Z 切片 P95 半径、Eyec_Point/Center socket）。\n任务：1) 从 scope_lens_geometry.md §2 提取 35 个未提取瞄具的 ItemId 和 mesh 名；2) grep asset_list_full_20260731.txt 定位它们的模型资产（Sco_* 命名）；3) DFExtract export 导出为 GLB 到 extracted/DeltaForce/Content/Models/Weapons/Parts/Sco/ 对应目录（保持目录结构）或 extracted/scope_round2/；4) 按同一测量法补量镜片中心/半径/镜筒轴长/目镜 socket；5) 产出补量表（并入原表编号）。仍导不出的标「pak 内无独立资产」。注意：export 大文件慢，只导 35 个目标，不要全量导出。\n\n产出：extracted/logs/scope_lens_geometry_round2.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-terra）。\n\n纪律（违反=废品）：\n- 只许写你负责的那一份报告到 extracted/logs/ + 你需要的导出产物到 extracted/ 对应目录，禁止改 range/\n- 工具链：cd C:/Users/Lenovo/Documents/kimi/workspace/tools/app && dotnet DFExtract_fixed.dll list|export \"D:/df_pak_copy/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll [--filter a,b,c] [--out x] [--assets assets.txt]；全量资产清单已在 extracted/asset_list_full_20260731.txt（142554 条，先 grep 它再决定导出什么，不要盲导）\n- 只用游戏内数据；找不到写「未找到」+ 搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到\n- 游戏目录只读禁止启动/写入；副本 D:/df_pak_copy 只读\n- 参考 extracted/logs/MECHANISMS_INDEX.md 避免重复挖"
+}

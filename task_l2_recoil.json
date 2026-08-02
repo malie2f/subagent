@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-luna",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 3600,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问；找不到的数据写明\"未找到+搜过哪里\"，禁止编造数值。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md（尤其补记22/23）了解已有结论，不要重复劳动；与既有报告（extracted/logs/*.md）交叉引用而非重写。\n\n【专项：枪械后坐力全机制】产出 extracted/logs/recoil_mechanism_full.md\n\n用户验收标准是\"和游戏内同场景对比一样才算过\"。已有基础：extracted/range_weapon_params.json、weapon_fx 的 gunkick/shake 曲线、补记里的既有后坐力报告。需要补全到 1:1：\n\n1. 后坐力数据表全解：recoil/spread 表（AimingTable 引用的 hipId/adsId 指向哪些表）逐字段含义；垂直/水平后坐、首发倍率、连发递增、后坐力恢复（recovery 速率/延迟）字段。\n2. 后坐力作用对象分解：多少分给相机（视角上抬）、多少分给枪身（gunkick 位移/旋转）、多少分给准星扩散（spread/bloom）？dump 证据。\n3. 弹道图生成机制：固定弹道图案（pattern）还是随机游走？弹道图案数据在哪张表？配件对弹道图案的修改方式（字段级）。\n4. 相机抖动（FireShake 曲线）与 gunkick 曲线的逐点数据与叠加规则；开镜状态后坐力差异（hip vs ads 两套 Id）。\n5. 呼吸/稳定性（开火稳定、瞄准呼吸稳定词条）对后坐力的修正公式。\n6. 结论：Web 端 1:1 后坐力实现所需的完整数据清单（每项 dump 出处）+ 逐枪参数表（至少覆盖 M7/M4/M250/AWM/ASVal）。"
+}

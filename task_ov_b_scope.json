@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-luna",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 7200,
+  "wait": false,
+  "task": "【项目】三角洲行动逆向+Web靶场。开工前必读（按序）：\n1. docs/README.md（铁律+阅读清单）\n2. docs/PROJECT_STRUCTURE.md（range/ 模块地图）\n3. docs/CONVENTIONS.md（工程纪律）\n4. docs/MISSION_20260801.md（本轮任务总书，你是 B 路）\n5. 专项：extracted/logs/scope_mechanism.md（瞄具机制全解，136行全字段/机瞄1.25/可变倍13镜/RTT双开关/ADS三曲线原值）、scope_native_static.md（RT档位EXE实证）、viewmodel_render_mechanism.md（瞄具改weaponFov）、ironsight_eye_relief.md与_round2.md（机瞄眼距：无socket定论）、ads_fidelity_baseline.md\n\n【背景】用户多次打回：瞄具机制始终没还原成游戏内表现。数据面已齐（见上专项），问题在实装与数据脱节。range/src/visual/scope_pip.js 现有 zoom（全屏FOV放大，游戏默认行为）/pip（RTT）两模式；core/ads-motion.js 有 ADS 时长+LUT。\n\n【任务】B路：瞄具机制还原。\n1. 审计现状：scope_pip.js/ads-motion.js/data/scope_data.js/data/weapon_fx.js 的实取值 vs scope_mechanism.md 的游戏表值，逐枪逐镜列出差异清单（机瞄倍率、各镜倍率档、ADS 时长、开镜 FOV 链）。\n2. 按数据修复：64 枪机瞄=1.25（AimingId→ZoomRate 链）；可变倍镜按 SupportedZoomRates 离散档（如 XM157 {1.5,3,7}）；RTT 默认关（bScopeUseRT=0，游戏原版=zoom 模式）；ADS 三曲线逐点；瞄具 FovForWeapon 对 weaponFov 的影响。\n3. 机瞄眼距按 ironsight_eye_relief 系列定论处理（无 socket 数据=禁止编造位置，用数据支持的方案）。\n4. 分划贴图：extracted/reticles/ 33 镜分划 PNG 已导出，检查 pip/zoom 模式下分划是否正确使用对应镜的贴图。\n\n【硬约束】只用游戏内数据；三档标注；游戏目录只读不启动；改码后 cd range && npm test 全绿；不跑 vite build；临时文件清理；无头浏览器自备 4530+ 端口，禁占 4173/4521/4522；与其他四路并行，只许改 scope/ads 域文件（scope_pip.js、ads-motion.js、scope_data.js 生成源、weapon_fx 生成源），main.js 改动最小化。\n\n【交付】\n1. 报告 extracted/logs/impl_scope_restore.md（UTF-8）\n2. 硬门槛（数值类+动画类混合）：\n   a. ≥5 把枪×各自瞄具的应用内实取倍率/ADS时长 vs 游戏表值对照表（误差=0 或有出处）\n   b. XM157 三档变倍（1.5/3/7）切换的帧序列截图（每档一张，画面内容须可辨认倍率差异）\n   c. 机瞄 ADS 进程 6 帧等距时间轴序列（一把自己有机瞄的枪），验证开镜过渡不翻枪/不跳变\n   d. 差异审计清单（改前 vs 改后）\n3. 改动文件清单\n\n【完成定义】报告落地+门槛产物齐+npm test 绿。",
+  "reasoning_effort": "max"
+}

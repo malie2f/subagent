@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【三角洲行动逆向·当前瞄具→现存资产映射表】\n背景：22 个 legacy 瞄具 mesh（Sco_4X_Leu-HAMR_002 等）已定案从当前客户端裁汰，但当前世代对应物存在于 pak（如 Sco_1X-5X_hamr_048_A/B）。报告 extracted/logs/scope_missing22_trace.md §A.3 有 22 行 legacy mesh 与变体对照初稿。\n任务：产出 extracted/logs/scope_current_mapping.md，建立完整的「当前游戏内瞄具物品 → 现存 cooked mesh」映射表。\n数据源（全部本地，只读）：\n1. gunsmith/gunsmith_data.js — parts[ItemId].mesh/name/category，全部瞄具 ItemId\n2. extracted/asset_list_gamedir_20260731.txt — 470,584 行全量资产清单（格式：路径\tpak名）\n3. extracted/dump_tables/DeltaForce_Content_DataTables_CommonItemAsset_CommonItemAssets_Weapon.uasset.json — Item1PMesh/3P/UI 引用\n4. extracted/logs/tmp_scope_trace/ 下既有检索中间产物\n要求：\n- 对 gunsmith_data.js 中每一个瞄具类 ItemId：给出游戏内中文名、mesh 字段、该 mesh 在 470k 清单中是否存在（精确检索）、若不存在给出当前世代替代 mesh（名称族/编号邻近/同名品牌推断，标推断理由）及其清单行号证据\n- 输出三档：A=mesh 直接存在（实证）；B=legacy 但有明确当前替代（推断+证据）；C=legacy 且无替代（未找到）\n- 铁律：只用游戏内数据，找不到写未找到，禁止编造；每条给证据（文件+行号）；未修改 range/，未启动游戏\n- 文末附统计：瞄具 ItemId 总数、A/B/C 各多少"
+}

@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 3600,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问；找不到的数据写明\"未找到+搜过哪里\"，禁止编造数值。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md（尤其补记22/23）了解已有结论，不要重复劳动；与既有报告（extracted/logs/*.md）交叉引用而非重写。\n\n【专项：人物移动机制全解】产出 extracted/logs/movement_mechanism.md\n\n目标 1:1 还原人物移动手感。已有 extracted/movement_params.json / movement_params2.json，需要确认覆盖率并补全：\n\n1. 速度体系：走/跑/冲刺/蹲走/趴移 各速度值与出处；加减速（加速度/减速度曲线或插值速率）；转身速率限制有无。\n2. 姿态切换：站↔蹲↔趴 的过渡时长、相机高度变化曲线（每姿态眼高数据）、过渡中能否开火/开镜的规则。\n3. 跳跃：初速度、重力、空中控制、落地硬直/减速；翻越机制有无。\n4. 歪头（lean）：角度、过渡时长、移动速度惩罚。\n5. 冲刺：进入条件、退出条件（开火/开镜/跳跃是否打断）、FOV 变化（我们现有 stanceView.fovOffset 的出处核对）。\n6. 移动对枪械的影响：移动中 spread 扩大、开火稳定词条的移动惩罚、移动中武器摇摆（bob/sway）数据——bob 是动画驱动还是参数驱动？\n7. 滑铲/战术冲刺等特殊移动有无数据。\n8. 结论：完整参数表（每项 dump 出处+置信度）+ 与 range/src 现有实现的对照差异清单（只列不改）。"
+}

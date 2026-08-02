@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【十轮·干员特效资产定向提取】请以最高思考档位运行。产出报告 extracted/logs/operator_vfx_assets.md。\n\n背景：三角洲行动逆向。干员技能特效是用户立过多次专项但始终没动的硬骨头。前面轮次已挖出部分技能机制表，但**特效资产本体（粒子/材质/贴图/音效）从未系统提取**。本任务只干一件事：把干员技能特效资产成建制地挖出来落盘。\n\n任务：\n1. 确定干员清单与技能 ID 映射（参考已 dump 的 extracted/parsed/ 里干员/技能相关表，如 OperatorTable/SkillTable 类）；优先全面战场常用干员（红狼/蜂医/威龙/牧羊人等以表为准）；\n2. 在 asset_list_gamedir_20260731.txt 里按技能 ID/干员名/Effect/VFX/Particle/Niagara/Cascade 关键词检索特效资产链：粒子系统、材质实例、贴图序列、音效（若 wwise 音频可导出则导出，不可则记录）；\n3. 导出：粒子/材质/贴图用 DFExtract export 落 extracted/operator_vfx/（按干员分目录）；粒子系统若为 Niagara/Cascade uasset，dump 其 JSON 结构（发射器参数是给前端复现用的核心数据，比贴图还重要）；\n4. 产出特效资产清单 JSON（extracted/operator_vfx/manifest.json）：每干员每技能=特效链（粒子 JSON 路径+贴图路径+材质参数+来源资产路径）；\n5. 技能机制侧补充：技能表里的冷却/持续时间/数量/触发方式字段一并整理进 manifest（若前序轮次已挖过则引用，不重复挖）。\n成功标准：至少 4 个干员的技能特效链完整落盘（粒子结构 JSON+贴图+材质参数）；manifest 可用；拿不到的部分写明未找到+证据。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump/list \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <dir> --assets <清单>。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；脚本写 tools/。报告写中文（若你的 CLI 写入中文会丢失，用英文写，禁止写成问号乱码——九轮 luna 报告中文全丢成问号，务必先写一行中文测试，丢字就整份写英文）。"
+}

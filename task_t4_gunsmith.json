@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 3600,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问；找不到的数据写明\"未找到+搜过哪里\"，禁止编造数值。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md（尤其补记22/23）了解已有结论，不要重复劳动；与既有报告（extracted/logs/*.md）交叉引用而非重写。\n\n【专项：改枪/配件机制全解】产出 extracted/logs/gunsmith_mechanism.md\n\n1. 槽位机制：每把枪的槽位清单数据出处；配件提供扩展槽位的机制（护木提供贴片/镭射/手电槽、增高架提供镭射/镜槽）在 dump 里怎么表达（字段级）；护木+枪管合并为单配件 vs 分离（SR25/SVCh）的数据标志。\n2. 配件属性词条：词条类型全枚举（后坐控制/开火稳定/瞄准速度/移动速度/人机工效……）每个词条影响什么数值、加成公式（加算/乘算/乘区）；配件负面属性。\n3. 数值面板：游戏改枪界面显示的面板数值（伤害/射速/后坐控制/稳定性/机动性……）从配件词条怎么算出来，公式推导。\n4. 配件兼容性：哪些配件互斥、枪管长度对配件的影响、瞄具与机瞄的替换规则（isDefaultSight 机制核对）。\n5. 配件对动画/视模的影响：长枪管对视模位置、重型配件对 ADS 时长（adsTimeMul 出处核对）、握把改变持枪动画的机制（握把类型→1P 动画选择的映射表）。\n6. 结论：改枪界面 1:1 所需完整数据清单（每项 dump 出处+置信度）。"
+}

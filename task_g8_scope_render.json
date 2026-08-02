@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【八轮·瞄具原版渲染机制·数据面深挖】请以最高思考档位运行。产出报告 extracted/logs/scope_render_data.md。\n\n背景：三角洲行动逆向项目。瞄具渲染是用户钦定的「必做底层逻辑」，此前多轮翻车。已有成果（先读，勿重复）：extracted/logs/scope_current_mapping.md（71 瞄具 ItemId 全量映射，A=42 mesh 现存/B=6 有替代/C=23 死行）、scope_lens_geometry 相关报告（62 镜 GLB 镜片几何真值）、pak_cdo_treasure.md（MDV 配置面全实证：8 倍率桶/DefaultMDV=1.33/官方「屏幕距离系数」语义/逐倍率 ADS 比率）。索引在 extracted/logs/MECHANISMS_INDEX.md。\n\n任务（全部从游戏内数据回答，禁止编造）：\n1. 判定游戏瞄具渲染路径：是 PIP（render target 画中画）还是投影分划（projected reticle）还是混合？证据来自 pak 内材质/蓝图资产——找瞄具材质（M_/MI_ 前缀 scope 相关）、RenderTarget 资产、分划贴图（reticle/crosshair 贴图集）\n2. 导出并解析代表性瞄具的完整资产链（至少 3 个不同档：红点/低倍/高倍如 XM157）：mesh→材质→材质实例参数→贴图，列出镜片材质的全部标量/向量参数（透明度、放大、视差、畸变等）\n3. 瞄具稳定性/摆动/呼吸数据：pak 内有无 scope sway/breath/parallax 配置表或曲线资产（对照：屏息机制已社区实证，步枪 20s×0.95、狙 33.33s×0.8、乘法叠加，见 MECHANISMS_INDEX 屏息条目）\n4. 变倍机制数据：XM157 等变倍镜的切档是离散还是连续、切档时长/曲线在哪个资产里\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <输出目录> --assets <清单文件>；全量资产清单 extracted/asset_list_gamedir_20260731.txt（470,584 条，121 pak/127 密钥已挂载成功）按关键词过滤。导出的 uasset 为 JSON 可直接读。\n\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁止改动；结论分实证/推断/未找到三档，每条给证据（资产路径+字段）；找不到写未找到+检索记录。脚本写到 tools/ 下。"
+}

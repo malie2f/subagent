@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 2400,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问\"要做什么\"；找不到的数据写明\"未找到+搜过哪里\"，禁止编造。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md 补记23 了解已有结论，不要重复劳动。\n\n【专项：1P 身体渲染机制（低头看腿）】产出 extracted/logs/fp_body_render_mechanism.md\n\n游戏内第一人称低头能看到自己的腿/身体。我们的复刻要么穿模要么朝向反。需要游戏原生机制：\n\n1. 游戏 1P 模式渲染的身体是哪个 mesh：完整 3P 身体模型复用，还是专用 1P 身体/腿 mesh？在 extracted/charbody_3p/ 和角色资产 dump 里找：1P 专用身体资产（命名线索 body_1p/fp_/v_ 前缀）、mesh 组件清单、渲染标志（bOwnerNoSee/OnlyOwnerSee 类字段在 dump 里的体现）。\n2. 身体与相机的绑定机制：身体跟随 yaw 还是也跟随 pitch？低头时身体怎么避免穿模（有没有相机-身体偏移、头部骨骼隐藏、mesh 按视角裁剪的机制）？找 dump 证据。\n3. 1P 身体用什么动画：复用 3P 剪辑（WalkF/JogF/Idle）还是专用 1P 剪辑？动画蓝图里 1P/3P 分支的证据。\n4. 身体渲染的朝向约定：mesh 前向定义、是否有运行时 180° yaw、root motion 处理。这是修复我们\"身体反转\"bug 的关键——必须给 dump 级证据，禁止坐标系推理。\n5. 蹲/趴/跳跃时身体的特殊处理（趴下时腿的姿态数据来源）。\n6. 结论：Web 端 1:1 还原 1P 身体的完整参数与变换清单（每项给 dump 出处+置信度）。"
+}

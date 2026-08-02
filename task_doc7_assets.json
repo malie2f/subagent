@@ -1,0 +1,1 @@
+{"runtime":"opencode","model":"deepseek-fuli/deepseek-v4-flash","timeout_sec":3600,"wait":false,"workdir":"C:/Users/Lenovo/Documents/kimi/workspace","task":"【资产库通读写文档⑦：extracted/ 全目录】通读 extracted/ 目录结构（参考 extracted/ASSET_LIBRARY.md 若存在），写文档：每个目录的内容/格式/出处 pak/数据产品间的血缘关系/被 range/ 消费的入口/规模统计。允许写 docs/code_review/asset_library.md，禁止改代码。不占 4173/4521/4522/8765 端口。"}

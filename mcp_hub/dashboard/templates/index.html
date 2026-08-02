@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>mcp-hub 仪表盘</title>
+<link rel="stylesheet" href="/static/style.css?v=20260729">
+</head>
+<body>
+
+<header>
+  <h1>mcp-hub 仪表盘</h1>
+  <div class="header-right">
+    <span id="last-update" class="muted">—</span>
+    <span id="auto-refresh-status" class="muted">⏸ 已暂停</span>
+    <button id="refresh-btn">↻ 刷新</button>
+    <label><input type="checkbox" id="auto-refresh" checked> 自动刷新（2秒）</label>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="overview">总览</button>
+  <button class="tab-btn" data-tab="dispatch">派活</button>
+  <button class="tab-btn" data-tab="runtimes">运行时</button>
+  <button class="tab-btn" data-tab="subagents">子 Agent</button>
+  <button class="tab-btn" data-tab="cluster">集群</button>
+  <button class="tab-btn" data-tab="tasks">任务</button>
+</nav>
+
+<main>
+
+  <!-- 总览 -->
+  <section class="tab" id="tab-overview">
+    <div class="grid">
+      <div class="card">
+        <h2>运行时 <span id="runtime-count" class="badge">0</span></h2>
+        <div id="runtime-list"></div>
+      </div>
+      <div class="card">
+        <h2>工具 <span id="tool-count" class="badge">0</span></h2>
+        <div id="tool-list"></div>
+      </div>
+      <div class="card">
+        <h2>集群</h2>
+        <div id="cluster-summary"></div>
+      </div>
+      <div class="card">
+        <h2>队列</h2>
+        <div id="queue-summary"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 运行时 -->
+  <section class="tab hidden" id="tab-runtimes">
+    <div id="runtime-detail"></div>
+  </section>
+
+  <!-- 子 Agent -->
+  <section class="tab hidden" id="tab-subagents">
+    <div class="split">
+      <div class="left">
+        <h2 style="display: flex; justify-content: space-between; align-items: center">
+          <span>子 Agent 列表 <span id="subagent-count" class="badge">0</span></span>
+          <label style="font-size: 12px; color: #7d8590; font-weight: 400; cursor: pointer">
+            <input type="checkbox" id="subagent-show-archived"> 显示已封存 (<span id="subagent-archived-count">0</span>)
+          </label>
+        </h2>
+        <div id="subagent-list"></div>
+      </div>
+      <div class="right">
+        <h2>详情 / 日志</h2>
+        <div id="subagent-detail"><p class="muted">选左侧一项查看详情</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 集群 -->
+  <section class="tab hidden" id="tab-cluster">
+    <div id="cluster-detail"></div>
+  </section>
+
+  <!-- 派活 -->
+  <section class="tab hidden" id="tab-dispatch">
+    <div class="card" style="margin-bottom: 16px">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
+        <h2 style="margin: 0">模型白名单（控制派活 tab 显示哪些 model）</h2>
+        <button id="dispatch-refresh-form" style="background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;" title="重置整个 form（重新拉 models / 白名单）">↻ 重置表单</button>
+      </div>
+      <p class="muted" style="font-size: 12px; margin-bottom: 8px">
+        每行一个 model（格式：<code>runtime/model</code> 或纯 <code>model</code>）。
+        留空 = 显示全部。白名单保存到 <code>data/dashboard_state.json</code>，dashboard 重启不丢。
+        <span class="muted">来源合并：<span id="pinned-source">.env + 此处</span></span>
+        <br><span class="muted" style="font-size: 11px">💡 自动刷新不会清空你正在编辑的内容；白名单失焦自动保存。</span>
+      </p>
+      <textarea id="pinned-models" rows="4" placeholder="例如：&#10;opencode-go/deepseek-v4-flash&#10;opencode-go/kimi-k3&#10;opencode-go/qwen3.7-plus&#10;kimi-code/kimi-for-coding" style="width: 100%; background: #0a0d12; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 12px; margin-top: 4px; font-family: monospace; resize: vertical;"></textarea>
+      <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px">
+        <button id="pinned-save" style="background: #1f6feb; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">保存白名单</button>
+        <button id="pinned-clear" style="background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;">清空（显示全部）</button>
+        <button id="pinned-reload" style="background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;">↻ 重读</button>
+        <span id="pinned-status" class="muted" style="font-size: 12px"></span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px">
+      <h2>快速派活</h2>
+      <p class="muted" style="font-size: 12px; margin-bottom: 12px">
+        选 runtime + model（或留空用默认 cluster.work），填任务内容，点"派发"。
+        任务进 topic，mcp-hub server 里的 worker 认领后调子 agent 跑。
+        署名默认 <b>用户</b>。
+      </p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px">
+        <div>
+          <label style="font-size: 11px; color: #7d8590">Runtime</label>
+          <select id="quick-runtime" style="width: 100%; background: #0a0d12; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 13px; margin-top: 4px;">
+            <option value="">（默认 cluster）</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #7d8590">Model</label>
+          <select id="quick-model" style="width: 100%; background: #0a0d12; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 13px; margin-top: 4px;">
+            <option value="">（任意）</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #7d8590">主题</label>
+          <input type="text" id="quick-topic" value="cluster.work" style="width: 100%; background: #0a0d12; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 13px; margin-top: 4px;">
+        </div>
+      </div>
+      <div style="margin-bottom: 8px">
+        <label style="font-size: 11px; color: #7d8590">任务内容</label>
+        <textarea id="quick-payload" rows="4" placeholder="例如：把 src/auth.py 重构一下，让所有 IO 调用 await 化..." style="width: 100%; background: #0a0d12; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 13px; margin-top: 4px; font-family: inherit; resize: vertical;"></textarea>
+      </div>
+      <details style="margin-bottom: 8px">
+        <summary style="font-size: 12px; color: #7d8590; cursor: pointer; padding: 4px 0">+ 验收标准（可选，启用后任务 complete 后进入 verifying 状态）</summary>
+        <div style="margin-top: 6px; padding: 8px; background: #0a0d12; border: 1px solid #21262d; border-radius: 4px">
+          <div style="margin-bottom: 6px">
+            <label style="font-size: 11px; color: #7d8590">验收标准（每行一条）</label>
+            <textarea id="quick-criteria" rows="2" placeholder="例如：&#10;代码通过 pytest&#10;无 lint 错误&#10;改动有单元测试" style="width: 100%; background: #161b22; border: 1px solid #21262d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 12px; margin-top: 4px; font-family: inherit; resize: vertical;"></textarea>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px">
+            <div>
+              <label style="font-size: 11px; color: #7d8590">验收 model（用哪个 model 验）</label>
+              <input type="text" id="quick-verifier" placeholder="claude / kimi / gpt-5.6-sol / 留空用 cluster 默认" value="" style="width: 100%; background: #161b22; border: 1px solid #21262d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 12px; margin-top: 4px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: #7d8590">最大重做次数</label>
+              <input type="number" id="quick-max-iter" value="2" min="0" max="10" style="width: 100%; background: #161b22; border: 1px solid #21262d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 12px; margin-top: 4px;">
+            </div>
+          </div>
+          <label style="font-size: 11px; color: #7d8590; display: flex; align-items: center; gap: 4px; margin-top: 6px">
+            <input type="checkbox" id="quick-auto-retry" checked> 验不过自动重发（auto_retry）
+          </label>
+          <label style="font-size: 11px; color: #7d8590; display: flex; align-items: center; gap: 4px; margin-top: 6px">
+            <input type="checkbox" id="quick-long-task"> 长任务模式（timeout 3600s，适合批量/多文件/复杂重构）
+          </label>
+        </div>
+      </details>
+      <div style="display: flex; gap: 8px; align-items: center">
+        <button id="quick-submit" style="background: #1f6feb; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;">派发</button>
+        <span id="quick-status" class="muted" style="font-size: 12px"></span>
+      </div>
+    </div>
+
+    <h2 style="font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px">
+      模型卡片墙
+      <select id="wall-runtime-filter" style="background: #0a0d12; border: 1px solid #30363d; color: #e6edf3; padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+        <option value="">所有 runtime</option>
+      </select>
+      <span class="muted" style="font-size: 11px; font-weight: 400">每个模型一张卡，点"派发"直接发到对应 model</span>
+    </h2>
+    <div id="model-wall"></div>
+
+    <div class="card" style="margin-top: 16px">
+      <h2>最近派发（实时刷新）</h2>
+      <p class="muted" style="font-size: 12px; margin-bottom: 8px">
+        本会话派过的所有任务，2s 轮询。点 task_id 跳到"子 Agent"看完整日志。
+      </p>
+      <div id="dispatch-list"></div>
+    </div>
+  </section>
+
+  <!-- 任务 -->
+  <section class="tab hidden" id="tab-tasks">
+    <div class="toolbar">
+      <input type="text" id="task-topic-filter" placeholder="按主题过滤（留空看所有）">
+      <button id="task-refresh">↻ 刷新</button>
+      <label style="font-size: 12px; color: #7d8590; margin-left: auto; cursor: pointer">
+        <input type="checkbox" id="task-show-archived"> 显示已封存 (<span id="task-archived-count">0</span>)
+      </label>
+    </div>
+    <div id="task-list"></div>
+    <div id="task-detail"></div>
+  </section>
+</main>
+
+</main>
+
+<footer>
+  <span class="muted">mcp-hub 仪表盘 · 只读 · 2秒轮询</span>
+</footer>
+
+<script src="/static/app.js?v=20260729"></script>
+</body>
+</html>

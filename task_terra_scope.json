@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-terra",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 2400,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问\"要做什么\"；找不到的数据写明\"未找到+搜过哪里\"，禁止编造。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md 补记23 了解已有结论，不要重复劳动。\n\n【专项：瞄准镜机制全解】产出 extracted/logs/scope_mechanism.md\n\n瞄准镜从立项到现在没做对过。要求一次性把游戏机制数据补全，暂不实装。\n\n1. 数据表全解：WeaponAimingTable（extracted/parsed/）每个 AimingId 的全部字段含义；aimingId→武器映射清单；zoomRate/scopeZoom/变倍档数据；机瞄 zoomRate=1.25 的出处。\n2. 开镜渲染路径：游戏什么时候用\"全屏 FOV 缩放\"什么时候用\"镜内放大（光学镜片独立渲染）\"？有没有瞄具类型分派字段（WeaponScopeBase 表/socket 数据里的镜片参数：镜筒长、目镜直径、出瞳距/眼距 eye relief）？extracted 下的瞄具 dump 全列。\n3. 变倍机制：可变倍瞄具的倍率档位数据（每档 FOV/变焦曲线）、切换动画时长。\n4. 瞄线机制：游戏如何决定\"准星/分划在屏幕正中\"——目镜光心 socket（我们已有 scopeLensCenter 数据）如何被相机对齐？眼距数据出处？瞄准点偏移（POD）字段？\n5. 开镜稳定性：呼吸晃动/屏息数据（sway/breath 表）、开火时开镜状态规则（supportsOpenSightOnFire 字段语义、开镜开火是否打断 ADS 的表字段）。\n6. ADS 过渡：on/off 时长、三条曲线（1pAnim/cameraFov/weaponFov）逐点值与叠加方式、idleCameraOffset/aimCameraOffset 单位与方向。\n7. 结论：Web 端 1:1 还原瞄准镜的完整参数清单（每项 dump 出处+置信度），以及我们现有 range/src/visual/scope_pip.js 与游戏机制的差异清单（只列差异，不改代码）。"
+}

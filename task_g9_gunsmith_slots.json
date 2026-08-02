@@ -1,0 +1,8 @@
+{
+  "runtime": "opencode",
+  "model": "opencode/deepseek/deepseek-v4-flash",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【九轮·改枪槽位机制全量挖掘】请以最高思考档位运行。产出报告 extracted/logs/gunsmith_slot_mining.md。\n\n背景：三角洲行动逆向。用户多次要求深度逆向改枪槽位机制，核心诉求三条：\n①**配件提供扩展槽位**：装上某配件后它提供新的配件槽（例：装护木后提供贴片槽/镭射槽/手电槽；部分增高架提供镭射槽/镜子槽）——这个「配件→提供槽位」关系表必须从 pak 数据全量挖出\n②**枪管+护木合并 vs 分离**：游戏里大多数枪护木和枪管是一个合并配件，但部分枪（用户点名 SR25、SVCh）护木和枪管是分开的两个配件——需要全武器逐枪判定规则\n③**每把枪的槽位布局**：每把武器有哪些槽位、每个槽位接受哪些配件、默认装什么（含机械瞄具默认件）\n\n方法：在 extracted/asset_list_gamedir_20260731.txt 和已 dump 的表里找 WeaponPart/Gunsmith/Mod/Slot 相关 DataTable（先 grep 清单里的表名候选，再 DFExtract dump 成 JSON 读结构）。已有资产：extracted/dump_tables/ 下已有一批表 JSON（先 ls 盘点，勿重复 dump）；extracted/logs/MECHANISMS_INDEX.md 有索引。\n产出要求：\n1. 槽位类型全集（槽位枚举/命名表）\n2. 「配件→提供槽位」关系表（至少覆盖护木/增高架类全部配件）\n3. 全武器逐枪槽位布局表（枪→槽位列表→默认配件），枪管/护木合并与分离逐枪标注\n4. 全部落到 extracted/gunsmith_slots/ 的机器可读 JSON/CSV + 报告\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据（表路径+行）；找不到写未找到+检索记录。脚本写 tools/。"
+}

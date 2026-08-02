@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 7200,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【返工·FP 身体渲染回归】请以最高思考档位运行。产出报告 extracted/logs/impl_fpbody_fix.md。\n\n背景：你在 impl_character_weapon.md 任务2 里重做了 FP 身体（range/src/visual/range_body.js 双组件结构）。用户实机验收**打回**，两张截图：C:/Users/Lenovo/AppData/Local/Temp/8ebaf129-37db-4d7b-8c9c-230e1bc3ba3d.png 与 C:/Users/Lenovo/AppData/Local/Temp/bfc4a256-e7d5-4f50-9925-75c72a658d93.png（先 ReadMediaFile 看）。用户原话：「身体渲染：摄像机错误，身体动作因为机器幻觉或者使用错误导致畸形」。截图里可见：白色弯曲管状物（疑似腿/身体 mesh 畸形拉伸）、暗绿色布状物（疑似身体 mesh 错位挂在镜头前）。\n\n任务：\n1. 诊断 range_body.js 当前实现哪里背离了你自己的数据包（extracted/fpbody_render/ 与 fpbody_render_mechanism.md）：重点查 a) 下半身几何选取逻辑（Hips+腿骨+蒙皮权重提取）是否把 mesh 搞畸形——Root/上身骨骼 scale=0 的语义是「动画图节点级压缩」不是让你改顶点；b) 组件父链挂载是否把 Body_3P 挂到了错误的节点导致跟随/拉伸错误；c) 相机链（FPPCamera→Camera_Joint、additive (0,5,10)cm、102.5cm 蹲眼高）是否被错误应用成了相机错误；d) 身体动画（走路/蹲/趴姿态）是否因骨骼映射错误产生畸形动作。\n2. 修复。严格遵守数据包：拿不准的语义（如 Root scale=0 节点）不要发明实现，回退到「Lower mesh 按 refpose 正常蒙皮渲染、继承身体水平父链」的最稳路径。\n3. 自验硬门槛：headless 1920×1080 截图三张存 extracted/logs/fpbody_fix_{stand,lookdown,crouch}.png——站立平视（视野里不得有任何身体 mesh 异物）、低头（应看到正常的腿，不畸形不穿模）、蹲下（身体姿态正常）。自己逐张看完再交。\n4. 不得破坏已验收项：G3/PTR32 机匣动画、挽歌/坠星者、Dolphin 数据引用、技能系统、场景（场景另有 k3 在修，别碰场景文件和 main.js 出生点）。npm test 保持全绿。\n\n边界：只改 range/src/visual/range_body.js 及必要的角色渲染配合文件；不跑 vite build；vite dev 127.0.0.1:4173 可热更验证（注意 4521 静态服可能被场景代理占用，用 4522 口验证）；游戏目录只读不启动。报告写中文（CLI 写中文变问号就写英文）。"
+}

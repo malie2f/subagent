@@ -1,0 +1,8 @@
+{
+  "runtime": "kimi",
+  "model": "kimi-code/kimi-for-coding",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【七轮攻坚·ARM64 静态分析：ADS 反向 alpha + MDV 变换公式】产出 extracted/logs/mobile_so_ads_mdv.md。\n样本：D:/df_mobile_sample/lib/arm64-v8a/libUE4.so（国服手游官方 APK，AArch64 ET_DYN，未加壳：正常节区/.text 292MB/.rodata 34MB/.eh_frame 52MB/.rela.dyn 34MB/925 dynsym）。\n工具链已备好：tools/arm64env/Scripts/python.exe（capstone 5.x + pyelftools）。分析方法建议：\n1. pyelftools 映射节区 VA↔文件偏移；扫 .rodata 建「字符串→VA」表\n2. 扫 .text 找 ADRP+ADD 指令对（ARM64 字符串引用惯例），建「字符串→引用代码地址」xref 表\n3. 命中后用 .eh_frame FDE 定函数边界，capstone 反汇编该函数，人工/脚本解读逻辑\n4. .rela.dyn 可辅助找函数指针表（vtable）\n已知线索（端游+手游 dump 已证实）：\n- 端游字段名（exe_deep_static.md §3）：bIsInZoomingProcess/ZoomingPercent/bIsInZoomInProcess/AimingControlAction::OnUpdate、CachedMDVFactorX/CachedMDVFactorY/SetMDVFactor(_BS/_ES)/MDVSwitchingMode(Interp/OnZoomIn/ZoomedIn)/DefaultMDV/MaxMDV/MinMDV/MaxADSSensitivity/MinADSSensitivity\n- 手游结构（mobile_dump_mining.md）：FWeaponZoomDataSettingRowHD、UClientSensitivitySetting::GetSensitivityFactor(bIsFiring, InZoomRate, ..., &MDVFactor)/SetMDVFactor、DFHDPlayerInput.MDV@0x6C0/MinMDV@0x6D0、EMDVSwitchingMode 三档\n- 端游 pak 表（pak_cdo_treasure.md）：WeaponZoomDataSettingHD 8 倍率桶 ZoomRate 2.0~100、SystemSettingHD MDV=1.33(0~5) 及官方中文定义「3D 角度灵敏度→2D 投影平面，同像素移动距离统一」\n两个目标：\nA. **ADS 中途反向 alpha 继承**：定位 AimingControlAction 的 OnUpdate/状态切换代码，搞清从 zoom-in 中途切到 zoom-out 时 alpha 是 reset/继续/镜像/补值镜像中的哪种，给出反汇编证据\nB. **MDV 变换公式**：定位 GetSensitivityFactor/SetMDVFactor 实现，搞清 MDVFactor 如何从 MDV 系数+ZoomRate 算出（尤其 MDV≥2/高倍率时是否有 clamp 或 1/ZoomRate 兜底），给出公式+反汇编证据\n纪律：纯静态只读分析，不运行 so，不启动游戏，不改 range/；结论三档实证/推断/未找到；每条给证据（函数偏移+capstone 反汇编片段）；找不到写未找到+检索记录。脚本可写到 tools/ 下。"
+}

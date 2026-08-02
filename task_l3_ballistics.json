@@ -1,0 +1,9 @@
+{
+ "runtime": "codex",
+ "model": "gpt-5.6-luna",
+ "from_model": "kimi",
+ "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+ "timeout_sec": 3600,
+ "wait": false,
+ "task": "项目：三角洲行动 Web 靶场复刻，工作目录 C:/Users/Lenovo/Documents/kimi/workspace。\n所有分析对象都是已解包到磁盘的数据（extracted/ 目录 + tools/DFExtract 工具链，密钥集内置，游戏目录只读）。\n【当前阶段纪律】纯研究，禁止改 range/ 任何代码，只在 extracted/logs/ 下写报告（中文）。\n任务书就是全部需求，直接开工，禁止反问；找不到的数据写明\"未找到+搜过哪里\"，禁止编造数值。\n每个结论标注证据（文件路径+字段/行）和置信度（实证/推断）。\n先读 PLAYBOOK.md 和 HANDOFF.md（尤其补记22/23）了解已有结论，不要重复劳动；与既有报告（extracted/logs/*.md）交叉引用而非重写。\n\n【专项：弹道/伤害/穿透机制】产出 extracted/logs/ballistics_damage_mechanism.md\n\n1. 弹丸：初速、重力/下坠、飞行时间模型（hitscan 还是 projectile，逐武器）；弹药类型表（6.8x51 PLY-I/FMJ/Hybrid/AP 等）穿透等级/伤害倍率/初速差异。\n2. 伤害模型：基础伤害、部位倍率（头/胸/四肢）、距离衰减曲线（衰减起点/终点/最低伤害）、TTK 计算公式。\n3. 护甲机制：护甲等级 vs 穿透等级的判定公式（穿透伤害/未穿透伤害/护甲损耗）。\n4. 穿透墙体/掩体机制：有无材质穿透表。\n5. 命中判定：弹道与 hitbox 的判定方式证据（服务器判定不管，只要客户端表现层数据）。\n6. 结论：Web 靶场 1:1 伤害/弹道所需完整参数清单（每项 dump 出处+置信度）；逐武器伤害表（M7/M4/M250/AWM/ASVal/SR25 至少）。"
+}

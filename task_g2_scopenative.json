@@ -1,0 +1,9 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项：瞄具 native 机制 EXE 静态分析（二轮）。\n背景：scope_unresolved.md 一轮已解出 ADS FSM 极性、变倍输入类链、SceneCapture 用法，但四个点未解。先例方法：对 Shipping EXE（D:/Delta Force/Delta Force/DeltaForceClient.exe，只读，禁止启动）做静态字符串/反射元数据分析，不读运行时内存。\n任务（四点逐个攻）：\n1) SniperRT 分辨率：找 RT 分辨率相关字符串/常量（如 512/1024/2048 与 Scope/RT 共现）；\n2) ADS 中途反向 alpha 继承公式：AimingControlAction/AdsCurve 相关符号面；\n3) MDV≥2 的 clamp/替代投影公式：MDV/MagnifiedDeviceView 相关字符串与反射；\n4) 变倍增减方向与首尾 wrap：一轮已解出类链，补具体方向语义。\n另参考 extracted/logs/ads_scope_reverse.md、scope_mechanism.md §11。解不出就写明字符串搜索记录，禁止猜公式。\n\n产出：extracted/logs/scope_native_static.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 gpt-5.6-terra）。\n\n纪律（违反=废品）：\n- 纯研究：只许写你负责的那一份报告到 extracted/logs/，禁止改 range/ 和 extracted/ 下其他任何文件\n- 只用游戏内数据：extracted/ 已解包产物、D:/df_pak_copy 副本（只读）、D:/Delta Force 游戏目录（只读，禁止启动游戏、禁止写）\n- 找不到就写「未找到」+ 搜过哪里，禁止编造数值；每条结论带证据（路径+行号/字段）和置信度（实证/推断/未找到）\n- 参考既有报告避免重复挖：extracted/logs/MECHANISMS_INDEX.md（13 份已验收权威报告索引）"
+}

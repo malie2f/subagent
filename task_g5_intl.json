@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "gpt-5.6-terra",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【调研任务·三角洲行动国际版/手游客户端可行性】纯网页调研+小文件验证，产出 extracted/logs/client_alternatives_probe.md。\n背景：国服 WeGame PC 端 Shipping EXE 已确认加壳/虚拟化（节区全 .std、熵≈8），5 个机制点（ADS反向alpha/MDV≥2公式/后坐三通道同帧顺序/M67引信起算点/HP=100默认值）静态不可逆。用户不信任拟合，要求继续攻克。\n调研三个替代客户端路线，每条给出可行性评级与具体下一步：\n1. **国际版 Steam 端（Delta Force by Level Infinite / TiMi）**：用 SteamDB（steamdb.info，搜 Delta Force app id）查 depot 结构——EX E文件名/大小、是否有 DRM 标记（SteamDB 会标 DRM: 如 Denuvo/自定义）；搜英文社区（reddit r/DeltaForceGlobal、GUID 解包社区、UnknownCheats 等）有没有人分析过国际版 EXE 是否加壳（Themida/VMProtect）。如果能确认国际版 EXE 未虚拟化，给出 Steam depot id + manifest 获取方式（DepotDownloader 可行性）。\n2. **手游端（三角洲行动手游 CN 官服 / Garena 国际服 com.garena.game.df）**：确认手游是 UE4（libUE4.so）还是别的引擎；手游 so 是否普遍未加壳（搜 AndUEDumper / Delta Force mobile libUE4.so 分析帖）；官方 APK 下载渠道（df.qq.com / Google Play apk 镜像）；libUE4.so 大致体积。\n3. **旧版本客户端**：2024 年 Hawk Ops alpha/公测早期版本是否有流传（archive.org / 社区备份），旧版 EXE 加壳情况。\n辅助参考：github.com/eikarna/deltaforce-dump 是手游 Garena 服的 UE4 dump（另一路在做）。\n纪律：纯调研，不下载大文件（>100MB 不下），不启动游戏；所有结论给来源 URL；找不到写未找到。"
+}

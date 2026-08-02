@@ -1,0 +1,9 @@
+{
+  "runtime": "kimi",
+  "model": "kimi-code/kimi-for-coding",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 3600,
+  "wait": false,
+  "from_model": "kimi",
+  "task": "专项（深度二进制）：EXE 五个未解点的最后一轮静态强攻。\n背景：两轮字符串面已到极限（scope_native_static.md / recoil_spring_static.md）。主体=D:/Delta Force/Delta Force/DeltaForce/Binaries/Win64/DeltaForceClient-Win64-Shipping.exe（553MB，只读，禁止启动游戏）。\n五个点：1) ADS 中途反向 alpha 继承公式；2) MDV≥2 的 clamp/替代投影公式；3) 相机后坐/FireShake/GunKick 同帧覆盖顺序；4) M67 引信起算点（5.0s 总引信任从何时计）；5) 玩家 HP=100 默认值出处。\n方法（字符串面之外的招）：\na) 先检查环境有无反汇编工具（where rizin/radare2/cutter/ghidra/ida，没有就纯 Python 字节分析，不要安装大软件）；\nb) 字符串 xref：已知偏移的字符串（如 FWeaponRecoilRecoverRuntime、CustomizeScopeRTSize、ExplosionSeconds）在 .text 里的引用位置，读出邻近常量/立即数；\nc) CVar/配置默认值表：UE 的 CVar 初始值常以「字符串+浮点常量」紧邻存储，搜 100.0/0.8/5.0 等目标值与相关字符串的共现；\nd) PE 结构：导出表/节区，判断代码是否被加固混淆（若全混淆就如实写「加固，静态不可解」）。\n产出：每个点三档定性：实证解出（给偏移+字节证据）/ 缩小范围（给了什么新线索）/ 反汇编级未解→拟合候选（并给拟合接口建议：前端该留什么参数位）。禁止把猜的公式写成实证。\n\n产出：extracted/logs/exe_deep_static.md（中文，Markdown 表格为主，文件头注明日期 2026-07-31、生成者 k3(kimi-code/kimi-for-coding)）。\n\n纪律（违反=废品）：\n- 只许写你负责的那一份报告到 extracted/logs/ + 任务必需的导出产物/工具改造（限 tools/ 和 extracted/），禁止改 range/\n- 只用游戏内数据；找不到写「未找到」+ 搜索记录，禁止编造；证据=路径+行号/字段；置信度=实证/推断/未找到\n- 游戏目录只读禁止启动/写入；副本 D:/df_pak_copy 只读\n- 全量资产清单 extracted/asset_list_full_20260731.txt（142,554 条，先 grep 再导出）；工具链 cd tools/app && dotnet DFExtract_fixed.dll list|export ...（参考 extracted/logs/ironsight_eye_relief_round2.md §1.2 的命令先例）\n- 参考 extracted/logs/MECHANISMS_INDEX.md 与既有报告，不重复挖"
+}

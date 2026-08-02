@@ -1,0 +1,9 @@
+{
+  "runtime": "opencode",
+  "model": "deepseek/deepseek-v4-flash",
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "timeout_sec": 7200,
+  "wait": false,
+  "task": "【项目】三角洲行动逆向+Web靶场。开工前必读（按序）： ｜ 1. docs/README.md（铁律+阅读清单） ｜ 2. docs/PROJECT_STRUCTURE.md（range/ 模块地图） ｜ 3. docs/CONVENTIONS.md（工程纪律） ｜ 4. docs/MISSION_20260801.md（本轮任务总书，你是 D 路） ｜ 5. 专项：extracted/logs/movement_mechanism.md（移动机制：速度表/姿态三层/跳跃物理/Lean/冲刺FOV）、table_gaps_round2.md（1207速度档等缺口结论）；数据：extracted/movement_params.json、movement_params2.json、extracted/movement_config/、extracted/parsed/ 移动相关 CSV ｜ 【任务】D路：干员移动机制还原。当前靶场人物移动（速度/姿态转换/跳跃/歪头）是早期手搓值，与游戏数据脱节。 ｜ 1. 审计现状：range/src/core/stance.js、core/input.js、main.js 移动相关实取值 vs movement_mechanism.md 游戏表值，列差异清单。 ｜ 2. 按数据实装：各姿态（站/蹲/趴）移动速度、姿态转换时长与眼高（蹲眼高 102.5cm 有出处）、跳跃物理（初速/重力/落地）、左右歪头（Lean 角度/速度）、冲刺速度与 FOV 变化。 ｜ 3. 数据缺失的项标【未找到】+搜索记录，禁止编造凑数。 ｜ 【硬约束】只用游戏内数据；三档标注；游戏目录 D:\\Delta Force 只读不启动；改码后 cd range && npm test 全绿；不跑 vite build；临时文件清理；无头浏览器自备 4530+ 端口，禁占 4173/4521/4522；与其他四路并行，只许改 stance.js/input.js/sensitivity.js 及你新增模块，main.js 改动最小化。 ｜ 【交付】 ｜ 1. 报告 extracted/logs/impl_movement.md（UTF-8） ｜ 2. 硬门槛（数值类）： ｜ a. 实测移动速度对照表：站立走/冲刺/蹲走/趴 各姿态，应用内实测 m/s（位移/时间法，真实浏览器页面测）vs 游戏表值，误差=0 或有出处 ｜ b. 姿态转换时长/眼高对照表（站↔蹲↔趴） ｜ c. 跳跃：滞空时间/跳高实测 vs 表值 ｜ d. Lean 角度实测 vs 表值 ｜ e. 差异审计清单（改前 vs 改后） ｜ 3. 改动文件清单 ｜ 【完成定义】报告落地+门槛产物齐+npm test 绿。",
+  "reasoning_effort": "max"
+}

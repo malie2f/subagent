@@ -1,0 +1,8 @@
+{
+  "runtime": "opencode",
+  "model": "opencode/deepseek/deepseek-v4-flash",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【九轮·武器侧机匣动画补齐 A 批】请以最高思考档位运行。产出报告 extracted/logs/weapon_anim_fill_a.md。\n\n背景：三角洲行动逆向。已有 19 族机匣动画入靶场 manifest（76 剪辑，见 range/src/data/weapon_anims.js），但另有 19 个人物族没有武器侧机匣动画数据（weaponClipInfo()=null）。补齐路径已验证可行：解包对应机匣 GLB+动画→重跑数据驱动转换脚本。\n必读文档（先读再动手，勿重复造轮子）：extracted/logs/weapon_anim_reverse.md（管线全文+§7 缺口）、extracted/logs/knife_mag_anim_data.md §3（现状底账）、extracted/logs/weapon_anim_index.json（41 机匣目录索引）、extracted/logs/weapon_anim_report.json（234 成功样本）。转换脚本在 tools/ 下（找现有的 AnimExtract/weapon anim 转换链）。\n\n你负责 10 族：**ak12、AM17、G3、MK47、PTR32、科隆-QBZ、ASH12、sr25、M250、QJB201**。\n每族步骤：①在 extracted/asset_list_gamedir_20260731.txt 找机匣目录（Parts/Rec/<类>/<机匣>/Anims?/1P/*.uasset）；②DFExtract 导出机匣 GLB+动画 uasset；③跑现有转换链生成 anim_json_weapon 格式 JSON+refpose 自检（判据：动画==refpose ⇒ 输出==GLB rest，容差 pos<0.25mm/rot<0.5°）；④逐族登记：机匣 mesh 名、换弹剪辑（ChangeClip/ChangeClipFull 及变体）、timeScale、magSeat（onGunAtStart/onGunAtEnd/dropped）、是否成功。\n\n工具：cd tools/app && dotnet DFExtract_fixed.dll export \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll --out <目录> --assets <清单文件>（list/dump 子命令同用法）。产物放 extracted/anim_json_weapon/ 与 extracted/refpose_weapon/（沿用现有命名）。\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；解不出的族写明原因。脚本写 tools/。"
+}

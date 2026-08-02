@@ -1,0 +1,8 @@
+{
+  "runtime": "codex",
+  "model": "codex/gpt-5.6-luna",
+  "wait": false,
+  "timeout_sec": 3600,
+  "workdir": "C:/Users/Lenovo/Documents/kimi/workspace",
+  "task": "【九轮·配件属性词条全表】请以最高思考档位运行。产出报告 extracted/logs/attachment_attr_tables.md。\n\n背景：三角洲行动逆向。用户要「哪些武器配件所代表的属性词条影响什么、对什么有加成」的完整答案，用于改枪界面数值面板 1:1。\n\n任务：\n1. **词条字典**：游戏内全部属性词条（后坐力控制/据枪稳定性/开火稳定性/瞄准稳定性/操控速度/腰射精度等）的官方中文名+英文/内部字段名+官方描述文本（LOC StringTable 里有官方释义，对照 pak_cdo_treasure.md 曾挖出 MDV 官方中文定义的方法），并说明每个词条影响什么（按官方描述原文，禁止自己编）\n2. **配件→词条→数值全表**：全部武器配件（瞄具/枪口/枪管/护木/握把/枪托/弹匣/贴片和镭射等）逐配件给出它加减哪些词条、数值多少——从 pak DataTable 挖（WeaponPart 相关表）\n3. **数值面板计算链**：游戏改枪界面的数值面板（六维条：伤害/射速/后坐力控制/据枪稳定性/操控速度/腰际射击精度类）如何从配件词条聚合——找面板显示用的表/公式字段（面板值是直接读表还是计算，给证据）\n产出：extracted/attachment_attrs/ 下机器可读 JSON/CSV（词条字典.json + 配件词条全表.csv + 面板聚合.json）+ 报告。\n\n方法：先 ls extracted/dump_tables/ 盘点已 dump 表（勿重复），在 extracted/asset_list_gamedir_20260731.txt 里 grep 候选表名（WeaponPart/Attribute/Modify/Stat/Attachment），再 DFExtract dump。工具：cd tools/app && dotnet DFExtract_fixed.dll export/dump \"D:/Delta Force/Delta Force/DeltaForce/Content/Paks\" --keys ../AES_Keys_fixed.json --oodle oo2core_8_win64.dll ...\n纪律：游戏目录只读；不启动游戏；不读运行时内存；range/ 前端禁改；结论三档实证/推断/未找到+证据；找不到写未找到+检索记录。脚本写 tools/。"
+}

@@ -1858,6 +1858,28 @@ async def cancel_subagent(task_id: str) -> str:
     return json.dumps({"ok": ok, "task_id": task_id}, ensure_ascii=False)
 
 
+# ---- 工具：usage_stats（token / cost 用量聚合）----
+
+@mcp.tool()
+async def usage_stats() -> str:
+    """聚合所有 subagent 的 token / cost 用量（按模型、按天分组）。
+
+    数据来源：registry（每个任务的 runtime/model/时间）+ transcript 里的
+    usage 事件。opencode / grok / codex 有 usage 数据；其它 runtime 的
+    adapter 不吐 usage，计入 tasks_without_usage，不编造。
+
+    返回 JSON：
+        - total: {tasks, tokens{input,output,reasoning,total,cache{read,write}}, cost}
+        - by_model: {"runtime/model": 同上}（按 total tokens 降序）
+        - by_day: {"YYYY-MM-DD": 同上}
+        - tasks_total / tasks_with_usage / tasks_without_usage
+    """
+    _init()
+    from .usage_stats import collect_usage
+
+    return json.dumps(collect_usage(), ensure_ascii=False, indent=2)
+
+
 # ---- 工具：list_tools（多模态工具总览）----
 
 @mcp.tool()

@@ -57,6 +57,11 @@ def create_app() -> "Flask":
     def api_runtimes():
         return jsonify(state.runtimes())
 
+    @app.route("/api/usage")
+    def api_usage():
+        """token / cost 用量聚合（按模型、按天）。"""
+        return jsonify(state.usage())
+
     @app.route("/api/subagents")
     def api_subagents():
         include_archived = request.args.get("include_archived", "false").lower() == "true"

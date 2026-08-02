@@ -186,6 +186,12 @@ class DashboardState:
             "items": self._runtimes_info(),
         }
 
+    def usage(self) -> dict[str, Any]:
+        """token / cost 用量聚合（registry + transcript usage 事件）。"""
+        from ..usage_stats import collect_usage
+
+        return {"ok": True, "ts": time.time(), **collect_usage()}
+
     def models_all(self) -> dict[str, Any]:
         """所有 runtime + model 列表（去重），按 runtime 分组。
 

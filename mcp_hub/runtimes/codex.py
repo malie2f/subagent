@@ -465,6 +465,26 @@ def _parse_codex_jsonl(stdout: str) -> list[dict[str, Any]]:
                             "content": text,
                         })
         elif et == "turn.completed":
+            # usage 映射成标准 usage 事件（input/output/reasoning/total + cache.read）
+            usage = ev.get("usage")
+            if isinstance(usage, dict):
+                tokens: dict[str, Any] = {}
+                for src, dst in (
+                    ("input_tokens", "input"),
+                    ("output_tokens", "output"),
+                    ("reasoning_output_tokens", "reasoning"),
+                    ("total_tokens", "total"),
+                ):
+                    v = usage.get(src)
+                    if isinstance(v, (int, float)):
+                        tokens[dst] = int(v)
+                cached = usage.get("cached_input_tokens")
+                if isinstance(cached, (int, float)) and cached:
+                    tokens["cache"] = {"read": int(cached), "write": 0}
+                if "total" not in tokens and ("input" in tokens or "output" in tokens):
+                    tokens["total"] = tokens.get("input", 0) + tokens.get("output", 0)
+                if tokens:
+                    events.append({"type": "usage", "tokens": tokens, "cost": 0.0})
             # 找最后一个 agent_message 当 final
             for prev in reversed(events):
                 if prev.get("type") == "turn" and prev.get("role") == "assistant":

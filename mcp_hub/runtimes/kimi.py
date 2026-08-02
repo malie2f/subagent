@@ -179,6 +179,18 @@ class KimiAdapter(RuntimeAdapter):
         # 抽 transcript
         if self.supports_stream_json() and _looks_like_jsonl(clean_stdout):
             events = _parse_kimi_stream_json(clean_stdout)
+            # stream-json 没有 usage，但 session 的 wire.jsonl 里每个 API 调用
+            # 都有 StatusUpdate.token_usage —— 按 session_id 捞回来补一条 usage 事件
+            sid = _extract_session_id(clean_stdout)
+            if sid:
+                usage_ev = _read_wire_usage(sid)
+                if usage_ev is not None:
+                    for i in range(len(events) - 1, -1, -1):
+                        if events[i].get("type") == "final":
+                            events.insert(i, usage_ev)
+                            break
+                    else:
+                        events.append(usage_ev)
         else:
             summary = _extract_summary(clean_stdout)
             artifacts = _extract_artifacts(clean_stdout)
@@ -408,3 +420,126 @@ def _build_transcript(
         })
 
     return events
+
+
+# ---------- wire.jsonl usage 解析 ----------
+
+def _extract_session_id(stdout: str) -> str | None:
+    """从 stream-json 的 meta session.resume_hint 行里提取 session_id。"""
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{") or "session" not in line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("role") == "meta" and "session" in str(ev.get("type", "")):
+            sid = ev.get("session_id")
+            if isinstance(sid, str) and sid:
+                return sid
+    return None
+
+
+def _read_wire_usage(session_id: str, sessions_root: Path | None = None) -> dict[str, Any] | None:
+    """读 kimi session 的 wire.jsonl，聚合每次 API 调用的 token 用量。
+
+    两种 session 布局/事件格式都支持（0.23.5 实测）：
+
+    新版（kimi-code 布局）：
+      路径 ~/.kimi-code/sessions/<wd_*>/<session_id>/agents/main/wire.jsonl
+      事件 {"type":"usage.record","usage":{"inputOther":N,"output":N,
+            "inputCacheRead":N,"inputCacheCreation":N},"usageScope":"turn",...}
+      一次 turn 一条，直接求和。
+
+    旧版（~/.kimi 布局）：
+      路径 ~/.kimi/sessions/<workdir-hash>/<session_id>/wire.jsonl
+      事件 {"message":{"type":"StatusUpdate","payload":{"token_usage":{
+            "input_other":N,"output":N,"input_cache_read":N,
+            "input_cache_creation":N},"message_id":"..."}}}
+      同一 message_id 可能推多条，按 message_id 去重取最后一条再求和。
+
+    没有 cost 源，cost 记 0。
+    """
+    roots = [sessions_root] if sessions_root is not None else [
+        Path.home() / ".kimi-code" / "sessions",
+        Path.home() / ".kimi" / "sessions",
+    ]
+    wire_files: list[Path] = []
+    for root in roots:
+        wire_files.extend(root.glob(f"*/{session_id}/agents/main/wire.jsonl"))
+        wire_files.extend(root.glob(f"*/{session_id}/wire.jsonl"))
+    if not wire_files:
+        return None
+
+    total = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+    found = False
+
+    def add(input_: int, output: int, cache_r: int, cache_w: int) -> None:
+        nonlocal found
+        total["input"] += input_
+        total["output"] += output
+        total["cache_read"] += cache_r
+        total["cache_write"] += cache_w
+        found = True
+
+    legacy_by_msg: dict[str, dict[str, Any]] = {}
+    for wire in wire_files:
+        try:
+            with wire.open("r", encoding="utf-8", errors="replace") as fp:
+                for idx, line in enumerate(fp):
+                    if "usage" not in line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(ev, dict):
+                        continue
+                    # 新版 usage.record
+                    if ev.get("type") == "usage.record":
+                        u = ev.get("usage")
+                        if isinstance(u, dict):
+                            add(
+                                int(u.get("inputOther") or 0),
+                                int(u.get("output") or 0),
+                                int(u.get("inputCacheRead") or 0),
+                                int(u.get("inputCacheCreation") or 0),
+                            )
+                        continue
+                    # 旧版 StatusUpdate
+                    msg = ev.get("message") or {}
+                    if msg.get("type") != "StatusUpdate":
+                        continue
+                    payload = msg.get("payload") or {}
+                    tu = payload.get("token_usage")
+                    if not isinstance(tu, dict):
+                        continue
+                    mid = str(payload.get("message_id") or f"_line_{idx}")
+                    legacy_by_msg[mid] = tu
+        except OSError:
+            continue
+
+    for tu in legacy_by_msg.values():
+        add(
+            int(tu.get("input_other") or 0),
+            int(tu.get("output") or 0),
+            int(tu.get("input_cache_read") or 0),
+            int(tu.get("input_cache_creation") or 0),
+        )
+
+    if not found:
+        return None
+    return {
+        "type": "usage",
+        "tokens": {
+            "input": total["input"],
+            "output": total["output"],
+            "reasoning": 0,
+            "total": total["input"] + total["output"] + total["cache_read"] + total["cache_write"],
+            "cache": {"read": total["cache_read"], "write": total["cache_write"]},
+        },
+        "cost": 0.0,
+    }

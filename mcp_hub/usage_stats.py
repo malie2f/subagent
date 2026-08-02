@@ -11,7 +11,8 @@ usage 事件覆盖情况（2026-08-02 时点）：
   - grok     ✅（单 JSON 输出映射，cost = total_cost_usd 刊例估算价）
   - codex    ✅（turn.completed 的 usage 映射；多 turn 会话会多次发出，按出现求和）
   - claude   ✅ / zcode ✅（2026-08-02 补）
-  - kimi ✗（CLI 无任何 usage 输出路径，等 CLI 升级）
+  - kimi     ✅（stdout 无 usage，改从 session 的 wire.jsonl 解析：新版
+    agents/main/wire.jsonl 的 usage.record + 旧版 StatusUpdate.token_usage 双格式）
   - codebuddy / qoder ✗（text 模式无数据源；改 spawn 加 --output-format json 可解，未做）
   - antigravity ✗（text 模式无数据源；--output-format json 已实测可用，切换待做）
   以上 ✗ 任务计入 tasks_without_usage，不编造数据。

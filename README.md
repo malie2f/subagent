@@ -8,16 +8,20 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                        MCP Hub (本项目)                          │
 │                                                                  │
-│   ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌──────────┐  │
-│   │ Anthropic  │  │   OpenAI   │  │  Moonshot  │  │ MiniMax  │  │
-│   │  (Claude)  │  │   (Codex)  │  │   (Kimi)   │  │          │  │
-│   └────────────┘  └────────────┘  └────────────┘  └──────────┘  │
+│   MCP 工具层（server.py，30 个工具）：                           │
+│   模型调用 / 子 agent 调度 / 任务队列 / cluster 集群 / mmx 多模态 │
 │                                                                  │
-│   6 个 MCP 工具：list_models / call_model / publish_task /       │
-│                  claim_task / complete_task / queue_status /     │
-│                  dispatch_and_wait                               │
+│   ┌──────────────┐ ┌──────────────┐ ┌─────────┐ ┌─────────────┐  │
+│   │ models/      │ │ runtimes/    │ │ tools/  │ │ cluster/    │  │
+│   │ 直连 LLM API │ │ fork CLI 子  │ │ mmx     │ │ N 个 worker │  │
+│   │ （轻量问答） │ │ agent，9 个  │ │ 多模态  │ │ 并行消费    │  │
+│   │              │ │ 可用 runtime │ │         │ │             │  │
+│   └──────────────┘ └──────────────┘ └─────────┘ └─────────────┘  │
 │                                                                  │
-│   任务队列（JSON 文件，支持 publish/claim/complete/topic）      │
+│   任务队列（JSON 文件，支持 publish/claim/complete/topic）       │
+│                                                                  │
+│   dashboard（http://127.0.0.1:8766，Flask 只读面板，              │
+│              看 runtime / subagent / cluster / 任务状态）        │
 └──────────────────────────────────────────────────────────────────┘
         ▲           ▲           ▲           ▲           ▲
         │           │           │           │           │
@@ -90,7 +94,7 @@ CUSTOM_OPENAI_MODEL=qwen2.5-coder:7b
 }
 ```
 
-接入后，Claude Code 的工具列表里会多出 6 个 hub 工具。你可以这样跟 Claude 说：
+接入后，Claude Code 的工具列表里会多出 30 个 hub 工具。你可以这样跟 Claude 说：
 
 > "用 kimi 总结一下我刚贴的这段长文"
 > "把这段代码交给 gpt 看看有没有 bug"
@@ -182,6 +186,12 @@ python -m mcp_hub.cli status
 
 # 持续打印某个 topic 的新任务
 python -m mcp_hub.cli watch code-review
+
+# 管理本地 hub / dashboard 进程（等价 start_mcp_hub.ps1 的启停，幂等）
+python -m mcp_hub.cli service start     # 端口已在监听就跳过
+python -m mcp_hub.cli service status    # 两个端口 LISTENING 状态 + dashboard 概要
+python -m mcp_hub.cli service stop      # 按端口找 PID 并 taskkill
+python -m mcp_hub.cli service restart   # 先 stop 再 start
 ```
 
 ---
@@ -208,34 +218,56 @@ asyncio.run(main())
 
 ## MCP 工具一览
 
-被 MCP 客户端看到时，工具签名是这样的：
+被 MCP 客户端看到时共 30 个工具，按用途分组（详细参数说明见 [MCP_USAGE.md](./MCP_USAGE.md)）：
+
+**模型 / 能力发现**
 
 | 工具 | 说明 |
 |---|---|
-| `list_models()` | 列出 hub 装载的所有模型（直连 API） |
-| `call_model(model, prompt, system?, max_tokens?, temperature?)` | 同步调一个模型（直连 API） |
+| `list_models()` | 列出 hub 装载的所有模型（直连 API + 各 runtime 的子代理模型） |
+| `list_model_aliases()` | 列出逻辑模型别名（deepseek / minimax / claude / kimi / gpt）和 fallback 链 |
 | `list_runtimes()` | 列出可用的 subagent runtime（CLI 子进程型 agent） |
+| `list_tools()` | 列出可用的多模态/工具型 adapter（mmx 等） |
 | `recommend_model(task, priority?)` | 根据任务描述推荐最适合的 runtime + model（fast/balanced/quality） |
+
+**直连调用**
+
+| 工具 | 说明 |
+|---|---|
+| `call_model(model, prompt, system?, max_tokens?, temperature?)` | 同步调一个模型（直连 API） |
+
+**子 agent 调度**
+
+| 工具 | 说明 |
+|---|---|
 | `spawn_subagent(runtime, model, task, workdir?, timeout_sec?, wait?, from_model?)` | 真的 fork 一个 CLI 子 agent 进程；`runtime`/`model` 传 `"auto"` 会自动路由 |
 | `subagent_status(task_id?)` | 看子 agent 状态 |
 | `cancel_subagent(task_id)` | 杀掉子 agent |
-| `list_tools()` | 列出可用的多模态/工具型 adapter（mmx 等） |
-| `mmx_chat(message, model?, system?, max_tokens?, temperature?)` | mmx 文本对话 |
-| `mmx_image_generate(prompt, aspect_ratio?, n?, out_dir?, out?, seed?, model?)` | mmx 图像生成 |
-| `mmx_speech(text, voice?, out?, format?, speed?, pitch?)` | mmx 语音合成（TTS） |
-| `mmx_music_generate(prompt, out?, lyrics?)` | mmx 音乐生成 |
-| `mmx_search(query, count?)` | mmx 搜索 |
-| `mmx_vision(image, prompt?)` | mmx 看图理解 |
-| `mmx_quota()` | mmx 配额查询 |
-| `mmx_voices()` | mmx 语音 preset 列表 |
-| `mmx_video_generate(prompt, out?, duration?, resolution?, model?)` | mmx 视频生成（异步） |
-| `mmx_video_get(task_id)` | mmx 视频任务状态 |
+| `usage_stats()` | 聚合所有 subagent 的 token / cost 用量（按模型、按天分组） |
+
+**任务队列**
+
+| 工具 | 说明 |
+|---|---|
 | `publish_task(topic, payload, from_model?, for_model?, metadata_json?, max_retries?, acceptance_json?, webhook?)` | 异步发布任务 |
-| `verify_task(task_id, verifier, passed, score?, issues?)` | 写验收结果 |
 | `claim_task(topic, worker, for_model?)` | 认领一个待处理任务 |
 | `complete_task(task_id, worker, result, error?)` | 写回任务结果 |
+| `verify_task(task_id, verifier, passed, score?, issues?)` | 写验收结果 |
 | `queue_status(task_id?)` | 队列总览 / 单任务详情 |
 | `dispatch_and_wait(topic, prompt, worker_model, ...)` | 一键派活并等结果（轮询） |
+
+**Cluster 集群**
+
+| 工具 | 说明 |
+|---|---|
+| `submit_cluster_task(payload, pool?, ...)` | 提交任务到集群的某个 pool，等任意 worker 认领 |
+| `list_workers()` | 列出所有 worker 状态（idle/busy + 当前任务 + 统计） |
+| `scale_workers(n, pool?)` | 动态调整集群 worker 数 |
+| `cluster_stats()` | 集群总览：worker 状态汇总 + 队列堆积 |
+
+**mmx 多模态（10 个）**
+
+`mmx_chat` / `mmx_image_generate` / `mmx_speech` / `mmx_music_generate` / `mmx_search` / `mmx_vision` / `mmx_quota` / `mmx_voices` / `mmx_video_generate` / `mmx_video_get` —— MiniMax 文/图/音/视频/搜索一把梭，参数见 MCP_USAGE.md。
 
 ---
 
@@ -310,11 +342,15 @@ Claude Code 内部自带 Bash/Edit/Read 工具链和长 context，能自己迭�
 |---|---|---|---|
 | `opencode` | `opencode` 1.18+ | ✅ | OpenCode Go/Zen 套餐，多 provider 都能跑 |
 | `claude` | `claude` 2.1+ | ✅ | Claude Code |
+| `codex` | `codex` 0.144+ | ✅ | Codex CLI；`codex exec` + 跳过 sandbox |
 | `kimi` | `kimi` 0.23+ | ✅ | Kimi Code |
 | `antigravity` | `antigravity` 1.1+ / `agy` | ✅ | Google Antigravity；会自动探测 Windows 系统代理 / 常见本地代理端口 |
+| `grok` | `grok` 0.2+ | ✅ | Grok Build；`-p` headless 单轮，JSON 输出 |
+| `codebuddy` | `codebuddy` | ✅ | 腾讯 CodeBuddy Code；deepseek-v3.2 / glm-5.0 / kimi-k2.5 等 |
 | `zcode` | `zcode` 0.15+ | ✅ | 智谱 Z.ai 的 ZCode；走 botcf provider（见下方配置说明） |
 | `qoder` | `qoderclicn` 1.1+ | ✅ | Qoder CN CLI；qwen3.8max / qwen3.7plus / DeepSeek-V4 等 |
 | `minimax` | — | 🟡 STUB | MiniMax Code 桌面 app 还没修好 CLI 入口 |
+| `mavis` | — | 🟡 STUB | Mavis CLI wrapper 路径坏了，等修好 |
 
 **权限自动通过与防挂起**
 
@@ -678,8 +714,8 @@ CUSTOM_OPENAI_MODEL=qwen2.5-coder:7b
 mcp-hub/
 ├── mcp_hub/
 │   ├── config.py            # .env 加载，ModelConfig
-│   ├── server.py            # FastMCP server，注册 22 个工具
-│   ├── cli.py               # 终端 CLI（不需 MCP 客户端）
+│   ├── server.py            # FastMCP server，注册 30 个工具
+│   ├── cli.py               # 终端 CLI（不需 MCP 客户端，含 service 进程管理子命令）
 │   ├── models/              # 第一层：直连 LLM API
 │   │   ├── base.py          # ModelAdapter / ChatRequest / ChatResponse
 │   │   ├── anthropic.py     # Claude
@@ -691,11 +727,15 @@ mcp-hub/
 │   │   ├── base.py          # RuntimeAdapter / SubagentHandle / SubagentResult
 │   │   ├── opencode.py      # OpenCode CLI
 │   │   ├── claude.py        # Claude Code CLI
+│   │   ├── codex.py         # Codex CLI
 │   │   ├── kimi.py          # Kimi Code CLI
 │   │   ├── antigravity.py   # Google Antigravity CLI
+│   │   ├── grok.py          # Grok Build CLI
+│   │   ├── codebuddy.py     # 腾讯 CodeBuddy CLI
 │   │   ├── zcode.py         # 智谱 ZCode CLI
 │   │   ├── qoder.py         # Qoder CN CLI
-│   │   └── minimax.py       # MiniMax Code (STUB，等 CLI 修好)
+│   │   ├── minimax.py       # MiniMax Code (STUB，等 CLI 修好)
+│   │   └── mavis.py         # Mavis Code (STUB，等 CLI 修好)
 │   ├── tools/               # 第三层：同步调用型 CLI 工具（多模态/搜索等）
 │   │   ├── base.py          # ToolAdapter / ToolResult
 │   │   └── mmx.py           # MMX-CLI 多模态
@@ -751,7 +791,7 @@ python -m mcp_hub.dashboard --port 9000   # 换端口
 
 | Tab | 看到什么 |
 |---|---|
-| **Overview** | 4 个 runtime 状态 + tools + cluster 配置 + 队列统计 |
+| **Overview** | 所有 runtime 状态 + tools + cluster 配置 + 队列统计 |
 | **Runtimes** | 每个 runtime 详细：binary、是否可用、models 列表 |
 | **Subagents** | 子 agent 列表（task_id / claimed_by / 状态 / 时长 / result preview）<br>+ 详情页：完整 stdout / stderr / 模型思考 |
 | **Cluster** | cluster 配置 + 队列堆积（pending/claimed/done/failed）|

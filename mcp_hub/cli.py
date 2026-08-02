@@ -9,6 +9,7 @@
     mcp-hub-cli complete <task_id> --worker gpt --result "做完了"
     mcp-hub-cli status
     mcp-hub-cli watch <topic>   # 持续打印新任务
+    mcp-hub-cli service start|stop|status|restart   # 管理本地 hub / dashboard 进程
 """
 
 from __future__ import annotations
@@ -16,14 +17,23 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import socket
+import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from .config import ensure_queue_dir, load_settings
 from .models import build_adapters
 from .models.base import ChatRequest, Message
 from .queue import TaskStore
+
+# hub 服务进程相关常量（与 start_mcp_hub.ps1 保持一致）
+HUB_PORT = 8765
+DASHBOARD_PORT = 8766
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+LOG_DIR = PROJECT_ROOT / "logs"
 
 
 def _print(obj) -> None:
@@ -150,6 +160,137 @@ async def cmd_watch(args) -> None:
         await asyncio.sleep(args.interval)
 
 
+# ---------- service：hub / dashboard 进程管理（同步，不走 asyncio） ----------
+
+def _find_listeners(port: int) -> list[int]:
+    """解析 netstat -ano，返回正在监听指定端口的 PID 列表（Windows）。"""
+    out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True).stdout
+    pids: set[int] = set()
+    for line in out.splitlines():
+        parts = line.split()
+        # 形如：TCP    127.0.0.1:8765    0.0.0.0:0    LISTENING    16372
+        if (
+            len(parts) >= 5
+            and parts[1].endswith(f":{port}")
+            and parts[3].upper() == "LISTENING"
+        ):
+            try:
+                pids.add(int(parts[-1]))
+            except ValueError:
+                pass
+    return sorted(pids)
+
+
+def _port_listening(port: int) -> bool:
+    """TCP 探测 127.0.0.1:port 是否在监听（等价 ps1 里的 Test-PortInUse）。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _spawn_detached(argv: list[str], out_log: Path, err_log: Path) -> int:
+    """等价 ps1 的 Start-Process：cwd=项目根，stdout/stderr 重定向到 logs/，
+    Windows 上脱离当前终端运行。返回子进程 PID。"""
+    LOG_DIR.mkdir(exist_ok=True)
+    flags = 0
+    if sys.platform == "win32":
+        flags = (
+            subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW
+        )
+    with open(out_log, "a", encoding="utf-8") as out, open(
+        err_log, "a", encoding="utf-8"
+    ) as err:
+        proc = subprocess.Popen(
+            argv, cwd=PROJECT_ROOT, stdout=out, stderr=err, creationflags=flags
+        )
+    return proc.pid
+
+
+def _start_one(name: str, port: int, argv: list[str], out_log: str, err_log: str) -> None:
+    if _port_listening(port):
+        print(f"{name} 已在端口 {port} 监听，跳过启动")
+        return
+    pid = _spawn_detached(argv, LOG_DIR / out_log, LOG_DIR / err_log)
+    print(f"{name} 已启动（端口 {port}，PID {pid}，日志 logs/{out_log} / {err_log}）")
+
+
+def _stop_one(name: str, port: int) -> None:
+    pids = _find_listeners(port)
+    if not pids:
+        print(f"{name}（端口 {port}）没有进程在监听，跳过")
+        return
+    for pid in pids:
+        r = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F"], capture_output=True, text=True
+        )
+        if r.returncode == 0:
+            print(f"{name}（端口 {port}）已停止，PID {pid}")
+        else:
+            msg = (r.stdout or r.stderr).strip()
+            print(f"taskkill PID {pid} 失败：{msg}", file=sys.stderr)
+
+
+def cmd_service_start(args) -> None:
+    _start_one(
+        "hub MCP 服务",
+        HUB_PORT,
+        [sys.executable, "-m", "mcp_hub", "--transport", "sse", "--port", str(HUB_PORT)],
+        "hub.out.log",
+        "hub.err.log",
+    )
+    _start_one(
+        "dashboard",
+        DASHBOARD_PORT,
+        [sys.executable, "-m", "mcp_hub.dashboard", "--port", str(DASHBOARD_PORT)],
+        "dashboard.out.log",
+        "dashboard.err.log",
+    )
+
+
+def cmd_service_stop(args) -> None:
+    _stop_one("hub MCP 服务", HUB_PORT)
+    _stop_one("dashboard", DASHBOARD_PORT)
+
+
+def cmd_service_status(args) -> None:
+    for name, port in (("hub MCP 服务", HUB_PORT), ("dashboard", DASHBOARD_PORT)):
+        pids = _find_listeners(port)
+        if pids:
+            print(f"{name}: 端口 {port} LISTENING，PID {', '.join(map(str, pids))}")
+        else:
+            print(f"{name}: 端口 {port} 未监听")
+    # dashboard 在跑时顺便请求 /api/overview 打印概要，失败不崩
+    if _port_listening(DASHBOARD_PORT):
+        try:
+            url = f"http://127.0.0.1:{DASHBOARD_PORT}/api/overview"
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            summary = {}
+            for k, v in data.items():
+                if isinstance(v, list):
+                    summary[k] = f"{len(v)} 项"
+                elif isinstance(v, dict):
+                    scalars = {
+                        kk: vv
+                        for kk, vv in v.items()
+                        if isinstance(vv, (int, float, str, bool))
+                    }
+                    summary[k] = scalars or f"{len(v)} 个键"
+                else:
+                    summary[k] = v
+            print("\ndashboard /api/overview 概要：")
+            _print(summary)
+        except Exception as e:  # noqa: BLE001
+            print(f"\n（请求 /api/overview 失败：{e}）", file=sys.stderr)
+
+
+def cmd_service_restart(args) -> None:
+    cmd_service_stop(args)
+    cmd_service_start(args)
+
+
 # ---------- 入口 ----------
 
 def main() -> None:
@@ -190,8 +331,15 @@ def main() -> None:
     pw.add_argument("topic", help="任务主题")
     pw.add_argument("--interval", type=float, default=2.0)
 
+    psv = sub.add_parser("service", help="管理本地 hub / dashboard 进程")
+    sv = psv.add_subparsers(dest="service_cmd", required=True)
+    sv.add_parser("start", help="启动 hub + dashboard（已在跑就跳过）")
+    sv.add_parser("stop", help="按端口找 PID 并停止 hub + dashboard")
+    sv.add_parser("status", help="查看端口监听状态 + dashboard 概要")
+    sv.add_parser("restart", help="先 stop 再 start")
+
     args = p.parse_args()
-    handler = {
+    handlers = {
         "models": cmd_models,
         "call": cmd_call,
         "publish": cmd_publish,
@@ -199,9 +347,18 @@ def main() -> None:
         "complete": cmd_complete,
         "status": cmd_status,
         "watch": cmd_watch,
-    }[args.cmd]
+    }
+    service_handlers = {
+        "start": cmd_service_start,
+        "stop": cmd_service_stop,
+        "status": cmd_service_status,
+        "restart": cmd_service_restart,
+    }
     try:
-        asyncio.run(handler(args))
+        if args.cmd == "service":
+            service_handlers[args.service_cmd](args)
+        else:
+            asyncio.run(handlers[args.cmd](args))
     except KeyboardInterrupt:
         pass
 

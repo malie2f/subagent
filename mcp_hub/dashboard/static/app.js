@@ -7,7 +7,11 @@ let currentTab = 'overview';
 let currentSubagent = null;
 let liveEventSource = null;  // 当前正在实时 tail 的 SSE
 let liveStreamTaskId = null; // 当前正在实时看的 task_id
-let liveAutoScroll = true;   // SSE 日志跟随滚动（用户上翻时自动暂停）
+// SSE 日志跟随滚动（用户上翻时自动暂停），开关状态 localStorage 记忆，默认开
+let liveAutoScroll = localStorage.getItem('mchub.liveAutoScroll') !== '0';
+// 当前日志面板所在根节点：子 Agent / 任务两个详情面板的元素 id 相同，
+// 靠 root 限定 querySelector 范围，避免跨 tab 拿到隐藏面板的同名元素
+let liveRoot = null;
 let usageLastFetch = 0;      // 用量 tab 30s 节流（/api/usage 聚合有开销）
 
 // 封存会话显示开关
@@ -98,6 +102,16 @@ function fmtDuration(sec) {
   if (sec < 60) return sec.toFixed(1) + 's';
   if (sec < 3600) return (sec / 60).toFixed(1) + 'm';
   return (sec / 3600).toFixed(1) + 'h';
+}
+
+// 运行时长徽章用：mm:ss，超过 1 小时显示 "2h 05m"
+function fmtElapsed(sec) {
+  if (!sec || sec < 0) sec = 0;
+  const s = Math.floor(sec);
+  if (s < 3600) {
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
 }
 
 function fmtBytes(b) {
@@ -209,37 +223,80 @@ function stopLiveStream() {
     liveEventSource = null;
   }
   liveStreamTaskId = null;
+  liveRoot = null;
+}
+
+// 在 liveRoot 范围内查元素（没有 root 时退回全文档）
+function liveEl(id) {
+  return liveRoot ? liveRoot.querySelector('#' + id) : document.getElementById(id);
+}
+
+function saveLiveAutoScroll() {
+  try { localStorage.setItem('mchub.liveAutoScroll', liveAutoScroll ? '1' : '0'); } catch (e) { /* 隐私模式等场景忽略 */ }
+}
+
+// 把 liveAutoScroll 状态同步到 checkbox 和"回到底部"提示按钮
+function syncLiveScrollUI() {
+  const cb = liveEl('live-autoscroll');
+  if (cb) cb.checked = liveAutoScroll;
+  const jump = liveEl('live-jump-latest');
+  if (jump) jump.classList.toggle('hidden', liveAutoScroll);
+}
+
+function setLiveAutoScroll(on, pre) {
+  liveAutoScroll = on;
+  saveLiveAutoScroll();
+  syncLiveScrollUI();
+  if (on && pre) pre.scrollTop = pre.scrollHeight;
 }
 
 /**
- * 绑定日志面板的控制条（跟随滚动开关 / 清空）。
+ * 绑定日志面板的控制条（跟随滚动开关 / 清空 / 回到底部提示 / 状态点击重连）。
  * 每次详情面板 innerHTML 重渲染后都要重绑一次。
  */
-function bindLiveLogControls() {
-  const container = document.getElementById('live-log-container');
+function bindLiveLogControls(root) {
+  liveRoot = root || liveRoot;
+  const container = liveEl('live-log-container');
   if (!container) return;
   const pre = container.querySelector('pre');
-  const cb = document.getElementById('live-autoscroll');
-  const clearBtn = document.getElementById('live-clear');
+  const cb = liveEl('live-autoscroll');
+  const clearBtn = liveEl('live-clear');
+  const jumpBtn = liveEl('live-jump-latest');
+  const statusEl = liveEl('live-status');
   if (cb) {
-    cb.checked = liveAutoScroll;
-    cb.addEventListener('change', () => {
-      liveAutoScroll = cb.checked;
-      if (liveAutoScroll && pre) pre.scrollTop = pre.scrollHeight;
-    });
+    cb.addEventListener('change', () => setLiveAutoScroll(cb.checked, pre));
   }
   if (clearBtn && pre) {
     clearBtn.addEventListener('click', () => { pre.textContent = ''; });
   }
-  if (pre) {
-    // 用户上翻 = 暂停跟随；滚回底部 = 恢复跟随
-    pre.addEventListener('scroll', () => {
-      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
-      liveAutoScroll = atBottom;
-      const c = document.getElementById('live-autoscroll');
-      if (c) c.checked = atBottom;
+  if (jumpBtn && pre) {
+    jumpBtn.addEventListener('click', () => setLiveAutoScroll(true, pre));
+  }
+  if (statusEl) {
+    // 状态处于"已断开"时可点击手动重连（EventSource 自动重连之外的兜底）
+    statusEl.addEventListener('click', () => {
+      if (statusEl.classList.contains('reconnect') && statusEl.dataset.tid) {
+        const tid = statusEl.dataset.tid;
+        stopLiveStream();
+        liveRoot = root || liveRoot;  // stopLiveStream 清了 liveRoot，恢复
+        startLiveStream(tid, true);
+      }
     });
   }
+  if (pre) {
+    // 用户上翻 = 暂停跟随并提示；滚回底部 = 恢复跟随
+    pre.addEventListener('scroll', () => {
+      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+      if (atBottom !== liveAutoScroll) {
+        liveAutoScroll = atBottom;
+        saveLiveAutoScroll();
+        syncLiveScrollUI();
+      }
+    });
+  }
+  // 初始状态：记住的开关同步到 UI；跟随中则先滚到底
+  syncLiveScrollUI();
+  if (liveAutoScroll && pre) pre.scrollTop = pre.scrollHeight;
 }
 
 /**
@@ -250,19 +307,25 @@ function bindLiveLogControls() {
 function startLiveStream(tid, isRunning = true) {
   // 避免重复连接同一个 task
   if (liveStreamTaskId === tid && liveEventSource) return;
+  const root = liveRoot;  // stopLiveStream 会清 liveRoot，先存后恢复（面板 root 由 bindLiveLogControls 设定）
   stopLiveStream();
+  liveRoot = root;
 
-  const statusEl = document.getElementById('live-status');
-  const container = document.getElementById('live-log-container');
+  const statusEl = liveEl('live-status');
+  const container = liveEl('live-log-container');
   if (!statusEl || !container) return;
 
   if (!isRunning) {
-    statusEl.textContent = '■ 已结束（静态日志）';
+    statusEl.textContent = '■ 任务已结束（静态日志）';
     statusEl.style.color = '#7d8590';
+    statusEl.classList.remove('reconnect');
+    statusEl.title = '';
     return;
   }
   liveStreamTaskId = tid;
 
+  statusEl.dataset.tid = tid;
+  statusEl.classList.remove('reconnect');
   statusEl.textContent = '○ 连接中...';
   statusEl.style.color = '#d29922';
 
@@ -272,18 +335,23 @@ function startLiveStream(tid, isRunning = true) {
   // 详情面板可能整体重渲染，statusEl/pre 都会换成新元素，
   // 所以回调里每次现查 DOM，别闭包引用旧元素（否则会往 detached 节点里 append）
   es.onopen = () => {
-    const el = document.getElementById('live-status');
+    const el = liveEl('live-status');
     if (el && liveStreamTaskId === tid) {
       el.textContent = '● 已连接';
       el.style.color = '#2ea043';
+      el.classList.remove('reconnect');
+      el.title = 'SSE 实时日志流已连接';
     }
   };
   es.onerror = () => {
-    const el = document.getElementById('live-status');
-    // EventSource 默认会自动重连，不用手动 close
+    const el = liveEl('live-status');
+    // EventSource 默认会自动重连，不用手动 close；同时允许点击立即重连
     if (el && liveStreamTaskId === tid) {
-      el.textContent = '× 已断开，自动重连中…';
+      el.dataset.tid = tid;
+      el.textContent = '× 已断开（点击重连）';
       el.style.color = '#f85149';
+      el.classList.add('reconnect');
+      el.title = '连接断开，EventSource 自动重连中；点击可立即重连';
     }
   };
   es.onmessage = (e) => {
@@ -294,20 +362,22 @@ function startLiveStream(tid, isRunning = true) {
       return;
     }
     if (data.type === 'log') {
-      const c = document.getElementById('live-log-container');
+      const c = liveEl('live-log-container');
       const pre = c && c.querySelector('pre');
       if (pre) {
         pre.textContent += data.content;
         if (liveAutoScroll) pre.scrollTop = pre.scrollHeight;
       }
     } else if (data.type === 'meta') {
-      const el = document.getElementById('live-status');
+      const el = liveEl('live-status');
       if (el) el.title = data.path || '';
     } else if (data.type === 'error') {
-      const el = document.getElementById('live-status');
+      const el = liveEl('live-status');
       if (el) {
-        el.textContent = '错误: ' + (data.message || '');
+        el.dataset.tid = tid;
+        el.textContent = '错误: ' + (data.message || '') + '（点击重连）';
         el.style.color = '#f85149';
+        el.classList.add('reconnect');
       }
       es.close();
       liveEventSource = null;
@@ -663,7 +733,7 @@ async function renderSubagents() {
         <span class="muted">${escapeHtml(s.claimed_by || s.topic || '-')}</span>
         ${s.for_model ? `<span class="model-badge" title="调用的模型">🧠 ${escapeHtml(s.for_model)}</span>${effortBadge(s.for_model, s.reasoning_effort)}` : ''}
         ${isRunning
-          ? `<span class="elapsed-live" data-start="${s.claimed_at || s.created_at || 0}" title="已运行时长（每秒刷新）">⏱ ${fmtDuration(s.duration_sec)}</span>`
+          ? `<span class="elapsed-live" data-start="${s.claimed_at || s.created_at || 0}" title="已运行时长（每秒刷新）">⏱ ${fmtElapsed(s.duration_sec)}</span>`
           : `<span class="muted">${fmtDuration(s.duration_sec)}</span>`}
         <span class="muted">${fmtTime(s.claimed_at)}</span>
         ${s.last_activity ? `<span class="muted" title="最后活动时间">⏱ ${fmtTime(s.last_activity)}</span>` : ''}
@@ -695,11 +765,13 @@ async function renderSubagents() {
       !['running', 'claimed', 'pending'].includes(stillThere.status)
     ) {
       // 盯着的任务刚结束：关掉 SSE（后端流是无限 tail，不自己结束），状态置为已结束
+      // 注意先拿元素再 stopLiveStream（stop 会清 liveRoot）
+      const statusEl = liveEl('live-status');
       stopLiveStream();
-      const statusEl = document.getElementById('live-status');
       if (statusEl) {
-        statusEl.textContent = '■ 已结束';
+        statusEl.textContent = '■ 任务已结束';
         statusEl.style.color = '#7d8590';
+        statusEl.classList.remove('reconnect');
       }
     }
   }
@@ -734,6 +806,7 @@ async function showSubagentDetail(tid) {
   // 默认接口不含封存会找不到，详情直接显示"已消失"
   const s = (await fetchJson('/api/subagents?include_archived=true')).subagents.find(x => x.task_id === tid);
   if (!s) {
+    stopLiveStream();  // 任务消失，别再挂着 SSE
     document.getElementById('subagent-detail').innerHTML = '<p class="muted">已消失</p>';
     return;
   }
@@ -801,7 +874,7 @@ async function showSubagentDetail(tid) {
         <span id="live-status" class="muted" style="font-size: 11px">--</span>
       </h3>
       <div class="live-controls">
-        <label><input type="checkbox" id="live-autoscroll" checked> 跟随滚动</label>
+        <label><input type="checkbox" id="live-autoscroll"> 跟随滚动</label>
         <button id="live-clear">清空</button>
         <span class="muted">上翻暂停跟随，滚回底部恢复</span>
       </div>
@@ -813,6 +886,7 @@ async function showSubagentDetail(tid) {
       ` : ''}
       <div id="live-log-container">
         <pre class="log" style="max-height: 300px; background: #0a0d12; margin: 0">${log && log.content ? escapeHtml(log.content) : ''}</pre>
+        <button id="live-jump-latest" class="live-jump-latest hidden">⤓ 已暂停跟随，点击回到底部</button>
       </div>
     </div>
 
@@ -897,9 +971,9 @@ async function showSubagentDetail(tid) {
     });
   });
 
-  // 实时日志：绑定控制条；running 任务自动接 SSE 跟随，已结束的只留静态日志
-  liveAutoScroll = true;
-  bindLiveLogControls();
+  // 实时日志：绑定控制条（root 限定到这个详情面板，避免和任务 tab 的同名 id 冲突）；
+  // running 任务自动接 SSE 跟随，已结束的只留静态日志
+  bindLiveLogControls(document.getElementById('subagent-detail'));
   startLiveStream(tid, isRunning);
 
   // 用户手动干预事件绑定
@@ -1023,7 +1097,13 @@ async function showSubagentDetail(tid) {
         if (data.ok) {
           cStatus.textContent = '✓ 已停止（子进程已杀）';
           cStatus.style.color = '#2ea043';
+          const lStatus = liveEl('live-status');  // 先拿元素再 stop（stop 会清 liveRoot）
           stopLiveStream();
+          if (lStatus) {
+            lStatus.textContent = '■ 已停止';
+            lStatus.style.color = '#7d8590';
+            lStatus.classList.remove('reconnect');
+          }
           // 列表 2s 轮询也会更新，这里主动刷一次让状态立即反映
           await renderSubagents();
         } else {
@@ -1539,6 +1619,19 @@ async function renderTasks() {
     el.innerHTML = `<div class="muted">${showArchivedTasks ? '无任务' : '无活跃任务（已封存 ' + (r.archived_count || 0) + ' 个）'}</div>`;
     return;
   }
+  // 详情面板里盯着的任务刚结束：关 SSE + 状态置为已结束（同 renderSubagents 的处理）
+  if (currentTaskDetail && liveStreamTaskId === currentTaskDetail) {
+    const cur = r.tasks.find(t => t.task_id === currentTaskDetail);
+    if (cur && !['running', 'claimed', 'pending'].includes(cur.status)) {
+      const statusEl = liveEl('live-status');  // 先拿元素再 stop（stop 会清 liveRoot）
+      stopLiveStream();
+      if (statusEl) {
+        statusEl.textContent = '■ 任务已结束';
+        statusEl.style.color = '#7d8590';
+        statusEl.classList.remove('reconnect');
+      }
+    }
+  }
   el.innerHTML = r.tasks.map(t => {
     const isActive = currentTaskDetail === t.task_id;
     const verifyingBadge = t.status === 'verifying'
@@ -1559,6 +1652,9 @@ async function renderTasks() {
           ${t.from_model ? `<span class="muted">← ${escapeHtml(t.from_model)}</span>` : ''}
           ${t.for_model && t.for_model !== t.from_model ? `<span class="muted">→ ${escapeHtml(t.for_model)}</span>` : ''}
           <span class="muted">认领者 ${escapeHtml(t.claimed_by || '-')}</span>
+          ${['running', 'claimed'].includes(t.status) && (t.claimed_at || t.created_at)
+            ? `<span class="elapsed-live" data-start="${t.claimed_at || t.created_at}" title="已运行时长（每秒刷新）">⏱ ${fmtElapsed(Date.now() / 1000 - (t.claimed_at || t.created_at))}</span>`
+            : ''}
           <span class="muted">${fmtTime(t.created_at)}</span>
         </div>
         <div class="payload">${escapeHtml((t.payload || '').slice(0, 500))}</div>
@@ -1624,7 +1720,7 @@ async function toggleTaskDetail(tid) {
       <div class="card" style="margin-top: 12px">
         <div class="row1" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
           <h2 style="font-size: 14px; margin: 0">任务详情 · ${escapeHtml(t.task_id)}</h2>
-          <button onclick="currentTaskDetail=null; document.getElementById('task-detail').innerHTML=''; document.querySelectorAll('.task-item').forEach(e=>e.classList.remove('active'))" style="background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">收起</button>
+          <button onclick="stopLiveStream(); currentTaskDetail=null; document.getElementById('task-detail').innerHTML=''; document.querySelectorAll('.task-item').forEach(e=>e.classList.remove('active'))" style="background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">收起</button>
         </div>
         ${verifyingBanner}
         <table class="detail-table">
@@ -1650,12 +1746,13 @@ async function toggleTaskDetail(tid) {
             <span id="live-status" class="muted" style="font-size: 11px">--</span>
           </h3>
           <div class="live-controls">
-            <label><input type="checkbox" id="live-autoscroll" checked> 跟随滚动</label>
+            <label><input type="checkbox" id="live-autoscroll"> 跟随滚动</label>
             <button id="live-clear">清空</button>
             <span class="muted">上翻暂停跟随，滚回底部恢复</span>
           </div>
           <div id="live-log-container">
             <pre class="log" style="max-height: 300px; background: #0a0d12; margin: 0">${log && log.content ? escapeHtml(log.content) : ''}</pre>
+            <button id="live-jump-latest" class="live-jump-latest hidden">⤓ 已暂停跟随，点击回到底部</button>
           </div>
         </div>
 
@@ -1688,9 +1785,8 @@ async function toggleTaskDetail(tid) {
     `;
     detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-    // 实时日志：绑定控制条；running 任务自动接 SSE，已结束的只留静态日志
-    liveAutoScroll = true;
-    bindLiveLogControls();
+    // 实时日志：绑定控制条（root 限定到任务详情面板）；running 任务自动接 SSE，已结束的只留静态日志
+    bindLiveLogControls(document.getElementById('task-detail'));
     startLiveStream(tid, ['running', 'claimed', 'pending'].includes(t.status));
   } catch (e) {
     detailEl.innerHTML = `<div class="muted" style="color: #f85149; padding: 12px">异常: ${escapeHtml(e.message)}</div>`;
@@ -1768,12 +1864,12 @@ async function submitVerify(tid, passed) {
 
 // ---------- 启动 ----------
 
-// running 任务的已运行时长：每秒就地更新，不用整表重渲染
+// running 任务的已运行时长：每秒就地更新文本节点，不用整表重渲染
 setInterval(() => {
   const now = Date.now() / 1000;
   document.querySelectorAll('.elapsed-live').forEach(el => {
     const start = parseFloat(el.dataset.start || '0');
-    if (start > 0) el.textContent = '⏱ ' + fmtDuration(now - start);
+    if (start > 0) el.textContent = '⏱ ' + fmtElapsed(now - start);
   });
 }, 1000);
 

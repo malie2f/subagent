@@ -375,6 +375,16 @@ class DashboardState:
             last_activity = log.get("mtime") or t.get("claimed_at") or t.get("created_at")
             is_running = status in ("running", "claimed", "pending")
             stuck = is_running and last_activity and (now - last_activity) > STUCK_THRESHOLD_SEC
+            # registry 已落终态（cancel/进程死亡）而队列状态还停在活跃：以 registry 为准
+            # 覆盖（只读派生，不改存储），列表才能立即反映 cancel，不用等 worker 感知退出
+            reg_entry = reg_by_id.get(tid) or {}
+            reg_status = reg_entry.get("status") or ""
+            if is_running and reg_status in ("cancelled", "dead", "done"):
+                status = reg_status
+                is_running = False
+                stuck = False
+                if not t.get("completed_at") and reg_entry.get("finished_at"):
+                    t["completed_at"] = reg_entry["finished_at"]
             all_subagents.append({
                 "task_id": tid,
                 "topic": t.get("topic"),

@@ -992,3 +992,101 @@ footer {
   font-size: 11px;
   font-weight: 600;
 }
+
+/* ---------- 监视体验：实时日志面板 / 运行时长 / 状态补充 ---------- */
+
+/* 任务状态补充色（running 来自 registry 直报，cancelled/dead 来自 cancel/进程死亡） */
+.task-status.running   { background: #1f6feb; color: #fff; }
+.task-status.cancelled { background: #6e7681; color: #fff; }
+.task-status.dead      { background: #f85149; color: #fff; }
+
+/* 运行时长徽章（每秒就地刷新文本节点） */
+.elapsed-live {
+  color: #58a6ff;
+  font-family: monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* 实时日志面板控制条 */
+.live-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #7d8590;
+  margin-bottom: 6px;
+}
+.live-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.live-controls button {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  padding: 2px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.live-controls button:hover { background: #30363d; }
+
+/* 日志容器相对定位：右下角"回到底部"提示按钮 */
+#live-log-container { position: relative; }
+.live-jump-latest {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  background: #1f6feb;
+  color: #fff;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 11px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.live-jump-latest:hover { background: #388bfd; }
+.live-jump-latest.hidden { display: none; }
+
+/* 连接状态处于可点击重连态 */
+#live-status.reconnect {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+/* transcript 折叠块（reasoning 默认折叠 / 长参数可展开） */
+.reasoning-fold summary,
+.args-fold summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #a371f7;
+}
+.args-fold summary { color: #d29922; }
+.reasoning-fold .msg-content,
+.args-fold .msg-args { margin-top: 4px; }
+
+/* usage 聚合成一行小字 */
+.usage-line {
+  font-size: 11px;
+  color: #7d8590;
+  font-family: monospace;
+  padding: 2px 10px;
+}
+
+/* 停止任务按钮 */
+.danger-btn {
+  background: #da3633;
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.danger-btn:hover { background: #f85149; }
+.danger-btn:disabled { opacity: 0.5; cursor: default; }

@@ -187,10 +187,16 @@ class DashboardState:
         }
 
     def usage(self) -> dict[str, Any]:
-        """token / cost 用量聚合（registry + transcript usage 事件）。"""
+        """token / cost 用量聚合（registry + transcript usage 事件）。
+
+        by_model 转成 list 返回——Flask jsonify 会按 key 字母序重排 dict，
+        会毁掉 collect_usage 按 total tokens 降序排的顺序。
+        """
         from ..usage_stats import collect_usage
 
-        return {"ok": True, "ts": time.time(), **collect_usage()}
+        d = collect_usage()
+        d["by_model"] = [{"model": k, **v} for k, v in d["by_model"].items()]
+        return {"ok": True, "ts": time.time(), **d}
 
     def models_all(self) -> dict[str, Any]:
         """所有 runtime + model 列表（去重），按 runtime 分组。

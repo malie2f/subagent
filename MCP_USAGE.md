@@ -120,6 +120,7 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 - 复杂重构、兜底：`codex` + `gpt-5.6-sol` 或 `codebuddy` + `glm-5.2`
 - Claude 系任务：`claude` + `botcf-claude/claude-opus-5`（超时自动切 stable）
 - 多模态/搜索/语音/视频：直接用 `mmx_*` 工具
+- 看各模型 token / cost 用量：`usage_stats`（按模型+按天聚合，数据源是 transcript 的 usage 事件；opencode/grok/codex 有数据，其余 runtime 计入 without_usage）；dashboard 也有 `GET /api/usage`
 - 逆向工程 / 其它模型拒答的敏感任务：`grok` + `grok-4.5`（Grok Build，xAI 订阅额度、不按量计费；美国服务必须走代理——自动复用 antigravity 的代理探测，当前 127.0.0.1:17891；支持 `reasoning_effort=low/medium/high`，默认 high，小任务传 low 省额度；输出里的 `total_cost_usd` 只是刊例价估算，不是真实扣费）
 
 ---

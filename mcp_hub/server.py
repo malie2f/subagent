@@ -55,6 +55,96 @@ def _patched_client_request_validate(cls, obj, *args, **kwargs):
 
 _mcp_types.ClientRequest.model_validate = _patched_client_request_validate
 
+# ---- 错误富化：-32602 不再只回 "Invalid request parameters" + 空 data ----
+# SDK 的 receive loop（mcp/shared/session.py）把请求校验失败、会话未初始化等
+# 所有异常统一报成 -32602 + 固定 message + 空 data，调用方 agent 完全无法自查。
+# 这里富化 ErrorData：message 追加真实原因（客户端一般只显示 message），
+# data 附细节 + CALLING_SPEC §2 自查清单。借助 sys.exc_info() 拿 except 块里的活动异常。
+from mcp.shared import session as _mcp_shared_session
+from pydantic import ValidationError
+
+_CALLING_SPEC_HINT = (
+    "调用自查（mcp-hub/CALLING_SPEC.md §2）："
+    "① 严格按工具 schema 传参，schema 没有的字段不要传；"
+    "② 类型必须对（timeout_sec 是整数、wait 是布尔）；"
+    "③ *_json 后缀参数（metadata_json/acceptance_json）传 JSON 字符串，不是对象；"
+    "④ arguments 必须是对象，不能是 JSON 字符串；"
+    "⑤ workdir 用绝对路径。"
+)
+
+
+def _describe_request_error(exc: BaseException) -> str:
+    """把 receive loop 吞掉的异常翻成调用方能看懂的说明。"""
+    text = str(exc)
+    if isinstance(exc, RuntimeError) and "initialization" in text:
+        return (
+            "MCP 会话尚未完成 initialize 握手——通常是 hub 重启后客户端自动重连了 "
+            "SSE 但没有重新 initialize。请重连 MCP 服务（或重启当前会话）后重试。"
+        )
+    if isinstance(exc, ValidationError):
+        errs = exc.errors(include_url=False)
+        # ClientRequest 是 union：校验失败时每个成员分支都报一条 method 不匹配，
+        # 真正的错误在 method 匹配的那个分支里，优先展示该分支的字段错误。
+        by_branch: dict[Any, list[dict[str, Any]]] = {}
+        for e in errs:
+            loc = e.get("loc", ())
+            by_branch.setdefault(loc[0] if loc else "?", []).append(e)
+        matched = [
+            e
+            for branch_errs in by_branch.values()
+            if not any(x.get("loc", ())[-1:] == ("method",) for x in branch_errs)
+            for e in branch_errs
+        ]
+        parts = []
+        for err in (matched or errs)[:4]:
+            loc = ".".join(str(x) for x in err.get("loc", ()))
+            msg = err.get("msg")
+            parts.append(f"{loc}: {msg}" if loc else str(msg))
+        return f"请求结构校验失败（{'; '.join(parts)}）。"
+    return f"{type(exc).__name__}: {text}"
+
+
+_OrigErrorData = _mcp_types.ErrorData
+
+
+class _EnrichedErrorData(_OrigErrorData):
+    """只在 receive loop 的 -32602 兜底分支里富化 message/data，其余场景原样透传。"""
+
+    def __init__(self, **kwargs: Any) -> None:
+        if (
+            kwargs.get("code") == _mcp_types.INVALID_PARAMS
+            and kwargs.get("message") == "Invalid request parameters"
+            and not kwargs.get("data")
+        ):
+            exc = sys.exc_info()[1]
+            if exc is not None:
+                reason = _describe_request_error(exc)
+                kwargs["message"] = f"Invalid request parameters: {reason}"
+                kwargs["data"] = f"{reason}\n{_CALLING_SPEC_HINT}"
+        super().__init__(**kwargs)
+
+
+_mcp_shared_session.ErrorData = _EnrichedErrorData
+
+# ---- 容错：hub 重启后，已连接客户端重连 SSE 时经常不重新 initialize ----
+# 会话卡在 NotInitialized，之后所有请求都被报成 -32602（上面的富化让原因可见）。
+# hub 是本地工具代理，不依赖 per-session 能力协商（SDK 里 client_params 的访问
+# 都有 None 保护），强制 stateless 让新会话创建即 Initialized，重连后直接用。
+from mcp.server.session import ServerSession as _ServerSession
+
+_orig_server_session_init = _ServerSession.__init__
+
+
+def _patched_server_session_init(self, *args: Any, **kwargs: Any) -> None:
+    if len(args) >= 4:
+        args = (*args[:3], True, *args[4:])
+    else:
+        kwargs["stateless"] = True
+    _orig_server_session_init(self, *args, **kwargs)
+
+
+_ServerSession.__init__ = _patched_server_session_init  # type: ignore[method-assign]
+
 try:
     import psutil
 except ImportError:  # noqa: BLE001

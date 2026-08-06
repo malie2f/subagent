@@ -8,9 +8,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import anyio
 import pytest
 from mcp import types
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 from mcp.server.lowlevel.server import InitializationOptions
 from mcp.server.session import InitializationState, ServerSession
 from mcp.shared import session as shared_session
@@ -123,3 +127,30 @@ def test_string_arguments_still_tolerated():
     }
     req = types.ClientRequest.model_validate(payload)
     assert req.root.params.arguments == {}
+
+
+# ---------- 工具参数层：FastMCP pydantic 校验失败也带自查清单 ----------
+
+
+def _dummy_tool(timeout_sec: int = 600, wait: bool = True):
+    return {"timeout_sec": timeout_sec, "wait": wait}
+
+
+def test_tool_arg_validation_error_carries_hint():
+    fm = func_metadata(_dummy_tool)
+    with pytest.raises(ToolError) as exc_info:
+        asyncio.run(
+            fm.call_fn_with_arg_validation(_dummy_tool, False, {"timeout_sec": "abc"}, None)
+        )
+    text = str(exc_info.value)
+    assert "timeout_sec" in text  # 保留 pydantic 原始字段错误
+    assert "CALLING_SPEC" in text
+    assert "自查" in text
+
+
+def test_tool_arg_validation_success_passthrough():
+    fm = func_metadata(_dummy_tool)
+    out = asyncio.run(
+        fm.call_fn_with_arg_validation(_dummy_tool, False, {"timeout_sec": 300}, None)
+    )
+    assert out == {"timeout_sec": 300, "wait": True}

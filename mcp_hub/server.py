@@ -145,6 +145,30 @@ def _patched_server_session_init(self, *args: Any, **kwargs: Any) -> None:
 
 _ServerSession.__init__ = _patched_server_session_init  # type: ignore[method-assign]
 
+# ---- 错误富化②：工具参数校验失败也带自查清单 ----
+# 上面那条只管信封层 -32602；更常见的是参数到了工具层才被 pydantic 拒
+# （类型不对、_json 参数传了对象）。FastMCP 的参数校验统一收口在
+# FuncMetadata.call_fn_with_arg_validation，拦下 ValidationError，
+# 把 CALLING_SPEC §2 自查清单附进错误文本，让调用方直接自愈。
+from mcp.server.fastmcp.exceptions import ToolError as _ToolError
+from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata as _FuncMetadata
+
+_orig_call_fn_with_validation = _FuncMetadata.call_fn_with_arg_validation
+
+
+async def _patched_call_fn_with_validation(
+    self, fn, fn_is_async, arguments_to_validate, arguments_to_pass_directly
+):
+    try:
+        return await _orig_call_fn_with_validation(
+            self, fn, fn_is_async, arguments_to_validate, arguments_to_pass_directly
+        )
+    except ValidationError as e:
+        raise _ToolError(f"{e}\n\n{_CALLING_SPEC_HINT}") from e
+
+
+_FuncMetadata.call_fn_with_arg_validation = _patched_call_fn_with_validation
+
 try:
     import psutil
 except ImportError:  # noqa: BLE001

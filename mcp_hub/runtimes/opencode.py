@@ -330,6 +330,30 @@ class OpencodeAdapter(RuntimeAdapter):
             err_fp=err_fp,
         )
 
+    # ---- 孤儿任务死后补救：解析完整日志，补 transcript/usage ----
+
+    def finish_orphan(self, handle: SubagentHandle, result: SubagentResult) -> None:
+        """孤儿进程死后，从 output_file 的完整 JSONL 日志解析 transcript 落盘、
+        回填 result——死任务的 token 用量和最终输出不再丢失。"""
+        if handle.output_file is None:
+            return
+        try:
+            raw = handle.output_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        if not raw.strip():
+            return
+        clean = _clean_ansi(raw)
+        transcript, summary, artifacts = _parse_opencode_jsonl(clean)
+        if not transcript:
+            return
+        write_transcript(handle, handle.prompt, transcript)
+        result.transcript = transcript
+        if summary:
+            result.summary = summary
+        if artifacts:
+            result.artifacts = artifacts
+
     # ---- 内部工具 ----
 
     def _resolve_cmd(self) -> str:

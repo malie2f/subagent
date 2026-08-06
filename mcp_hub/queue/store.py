@@ -305,40 +305,12 @@ class TaskStore:
             "at": time.time(),
         }
 
-        # 1) webhook —— 用 stdlib http.client（同步），跑在 to_thread 里避免阻塞
+        # 1) webhook —— stdlib http.client（见 notify.post_webhook 注释）
         if task.webhook and urlparse(task.webhook).scheme in ("http", "https"):
             try:
-                import json as _json
-                import http.client as _hc
-                from urllib.parse import urlparse as _urlparse
+                from ..notify import post_webhook
 
-                p = _urlparse(task.webhook)
-                payload = _json.dumps(body).encode("utf-8")
-                host = p.hostname or "127.0.0.1"
-                port = p.port or (443 if p.scheme == "https" else 80)
-                path = p.path or "/"
-                if p.query:
-                    path += "?" + p.query
-
-                def _do_post():
-                    if p.scheme == "https":
-                        conn = _hc.HTTPSConnection(host, port, timeout=10)
-                    else:
-                        conn = _hc.HTTPConnection(host, port, timeout=10)
-                    try:
-                        conn.request(
-                            "POST",
-                            path,
-                            body=payload,
-                            headers={"Content-Type": "application/json"},
-                        )
-                        r = conn.getresponse()
-                        r.read()  # drain
-                        return r.status
-                    finally:
-                        conn.close()
-
-                status = await asyncio.to_thread(_do_post)
+                status = await post_webhook(task.webhook, body)
                 task.notify_history.append(
                     {"event": event, "url": task.webhook, "status_code": status, "at": time.time()}
                 )

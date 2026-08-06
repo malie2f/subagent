@@ -40,13 +40,37 @@
   "task": "任务指令全文",
   "workdir": "C:/Users/Lenovo/some/project",
   "timeout_sec": 600,
-  "wait": true
+  "wait": true,
+  "webhook": "http://127.0.0.1:9000/hook"
 }
 ```
 
 - `runtime` 和 `model` 必须配套（见第 4 节），配错直接 spawn 失败。
-- `wait=false` 立即返回 `task_id`，之后用 `subagent_status(task_id)` 查。
-- `from_model` 不用传，hub 会自动识别调用方平台（codex/kimicode/claude/...）。
+- `wait=false` 立即返回 `task_id` 和 `log_file`（死亡现场日志路径），之后用 `subagent_status(task_id)` 查。
+- `timeout_sec` 到点 hub 会 kill 直接子进程（opencode/codex 支持 session 的还会自动续跑最多 2 次）。
+- `webhook` 可选：终态时 POST 推送 `subagent.done` / `subagent.failed`，body 含 exit_code / exit_code_source / duration_sec / summary / stderr_tail / peak_rss_mb / peak_tokens / log_file。
+- `from_model` 不用传，hub 会自动识别调用方平台（优先 MCP 握手 clientInfo.name，再 UA / 父进程 / 环境变量）。
+
+### subagent_status —— 查状态（registry 落盘为准，死后/重启后可查）
+
+- `task_id` 留空 = 列表（新→旧最多 50 条，`total` 是 registry 总条数）；填 ID = 单条详情。
+- 详情字段：`status`(running/done/dead) / `exit_code` / `exit_code_source`（real=真实退出码，unknown=进程死透不可考，**不再谎报 0**）/ `duration_sec` / `summary` / `stderr_tail` / `peak_rss_mb` / `peak_tokens` / `log_file` / `caller` / `webhook` / `resumed_from` / `is_alive` / `result`（内存里有完整结果时带）。
+- `peak_tokens` 是日志里 step-finish 的 context tokens 峰值——zen-v4f 免费池 ~200k 会猝死，盯它判断该不该拆任务。
+
+### resume_subagent —— 死可续（opencode/codex/grok/qoder/codebuddy）
+
+```json
+{
+  "task_id": "原任务ID",
+  "task": "（可选）追加指令；留空=自动拼\"基于当前进度继续完成原任务\"",
+  "timeout_sec": 600,
+  "wait": true
+}
+```
+
+- 从原任务日志提取 session id，用同一 session 拉起新进程（复用上下文，不用从头来）。
+- 返回新 `task_id` + `session_id` + `resumed_from`；新任务的 status/webhook 行为与 spawn 一致。
+- 失败情形都有明确中文报错：registry 查不到 / runtime 不支持 resume / 日志文件没了 / 提取不到 session id。
 
 ### publish_task / dispatch_and_wait —— 走队列异步派活
 

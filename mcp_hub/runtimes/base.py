@@ -155,7 +155,7 @@ class SubagentResult:
     runtime: str
     model: str
     task_id: str
-    exit_code: int
+    exit_code: int | None  # None = 拿不到真实退出码（孤儿死透后），不谎报 0
     stdout: str
     stderr: str
     duration_sec: float
@@ -378,6 +378,16 @@ class RuntimeAdapter(abc.ABC):
     ) -> SubagentHandle:
         """基于已有 session 续跑（task 是调用方拼好的续跑提示词）。"""
         raise NotImplementedError(f"{self.name} 不支持续跑")
+
+    # ---- 孤儿任务死后补救（默认不做，有日志解析能力的 runtime 覆写） ----
+
+    def finish_orphan(self, handle: SubagentHandle, result: SubagentResult) -> None:
+        """孤儿进程（hub 重启前 spawn 的）自然死亡后被调用。
+
+        从 handle.output_file 的完整日志里解析 transcript/usage 落盘、
+        回填 result.summary/artifacts 等——让死任务的 token 用量和现场不丢。
+        默认什么都不做。
+        """
 
     # ---- 通用工具 ----
 

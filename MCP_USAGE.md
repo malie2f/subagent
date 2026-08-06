@@ -39,7 +39,9 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 | 场景 | 工具 | 关键参数 |
 |---|---|---|
 | 同步问一个模型 | `call_model` | `model`, `prompt` |
-| 派一个 CLI 子 agent 干活 | `spawn_subagent` | `runtime`, `model`, `task`, `workdir`, `wait`, `reasoning_effort` 可选 |
+| 派一个 CLI 子 agent 干活 | `spawn_subagent` | `runtime`, `model`, `task`, `workdir`, `wait`, `reasoning_effort`, `webhook` 可选 |
+| 续跑已死/中断的子 agent | `resume_subagent` | `task_id`, `task`/`wait` 可选（复用原 session 上下文） |
+| 查子 agent 状态/死亡现场 | `subagent_status` | `task_id` 可选（exit_code/peak_tokens/log_file 等） |
 | 让 hub 推荐模型 | `recommend_model` | `task`, `priority` (`fast`/`balanced`/`quality`) |
 | 看有哪些 runtime | `list_runtimes` | — |
 | 看模型别名 | `list_model_aliases` | — |
@@ -76,7 +78,8 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 ```
 
 - `wait: true`：阻塞等结果，返回 `summary/stdout/artifacts`
-- `wait: false`：立即返回 `task_id`，子 agent 在后台跑，之后用 `subagent_status(task_id=...)` 或 dashboard 看结果
+- `wait: false`：立即返回 `task_id` + `log_file`（现场日志路径），子 agent 在后台跑；之后用 `subagent_status(task_id=...)` 查——终态落 registry，**死了能查到真实 exit_code（exit_code_source=real；拿不到标 unknown，不谎报 0）、stderr_tail、peak_rss_mb、peak_tokens**，hub 重启后也可查
+- `webhook`（可选）：终态时 POST 推送 `subagent.done`/`subagent.failed`，不用自己轮询
 - `reasoning_effort`（可选）：思考等级 `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`（是否可用取决于模型——codex/gpt-5.6 全系含 max，DeepSeek V4 官方 API 实测有 high/max；CLI 不校验直接透传），仅 codex/opencode 等支持的 runtime 生效，其余忽略
 
 ### 3.3 让 hub 自己选模型
@@ -132,12 +135,14 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 子 agent 超时会被 kill，但 **opencode / codex / qoder / codebuddy / grok 支持原生 session 续跑**：
 
 - hub 自动用同一 session 续跑最多 2 次
+- 死了也能手动续：`resume_subagent(task_id=...)`——从原任务日志提取 session id，同一 session 拉起新进程，返回新 task_id + `resumed_from`；`task` 留空时自动拼"基于当前进度继续"
 - 你也可以在 dashboard 里点「手动续跑」继续给指令
 
 所以长任务建议：
 
 - `timeout_sec` 给足（1800~3600）
 - 优先用支持续跑的 runtime
+- 盯 `subagent_status` 的 `peak_tokens`：zen-v4f 免费池 context 爬到 ~200k 会猝死，接近就该拆任务或主动 resume
 
 ---
 

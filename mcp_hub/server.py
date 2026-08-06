@@ -174,6 +174,8 @@ try:
 except ImportError:  # noqa: BLE001
     psutil = None  # type: ignore[assignment]
 
+from pathlib import Path
+
 from .config import HubSettings, ensure_queue_dir, load_settings
 from .models import build_adapters
 from .models.base import ChatRequest, Message
@@ -194,13 +196,16 @@ from .fallbacks import (
 from .registry import (
     init_registry,
     _ensure_orphan_pollers,
+    _fire_subagent_webhook,
     _handle_alive,
     _kill_pid,
     _pid_alive,
     _recover_orphan_subagents,
     _registry_load_unlocked,
+    _registry_lock,
     _registry_mark,
     _registry_register,
+    _sample_process_stats,
 )
 
 
@@ -365,6 +370,7 @@ def _init() -> None:
         logger=_logger,
         subagents=_subagents,
         subagent_results=_subagent_results,
+        runtimes=_runtimes,
     )
 
     # 从 registry 恢复上次 hub 进程留下的孤儿子 agent（pid 还活着的重新盯上）
@@ -390,16 +396,36 @@ def _detect_caller(ctx: Context | None, fallback: str = "unknown") -> str:
 
     优先级：
       1. fallback 本身已是可识别平台名（非 unknown / 用户）
-      2. SSE/HTTP 请求的 User-Agent 头
-      3. stdio 模式下父进程名
-      4. 环境变量 hint（KIMI_CODE / CODEX / CLAUDE_CODE / OPENCODE）
-      5. 返回 fallback
+      2. MCP 握手 clientInfo.name（最直接；stateless 会话可能拿不到）
+      3. SSE/HTTP 请求的 User-Agent 头
+      4. stdio 模式下父进程名
+      5. 环境变量 hint（KIMI_CODE / CODEX / CLAUDE_CODE / OPENCODE）
+      6. 返回 fallback
     """
     # 1. 如果调用方已经显式署名且不是占位符，直接尊重
     if fallback and fallback not in ("unknown", "用户", "user", ""):
         return fallback
 
-    # 2. SSE / StreamableHTTP：从 ASGI request 取 User-Agent
+    # 2. MCP 初始化握手的 clientInfo.name
+    if ctx is not None:
+        try:
+            req_ctx = ctx.request_context
+            session = getattr(req_ctx, "session", None) if req_ctx is not None else None
+            client_params = getattr(session, "client_params", None) if session is not None else None
+            client_info = getattr(client_params, "clientInfo", None) if client_params is not None else None
+            ci_name = (getattr(client_info, "name", "") or "").strip()
+            if ci_name and ci_name.lower() != "mcp":  # python SDK 默认名，无信息
+                ci_lower = ci_name.lower()
+                for platform, keywords in _CALLER_KEYWORDS.items():
+                    if any(kw in ci_lower for kw in keywords):
+                        return platform
+                if _logger is not None:
+                    _logger.info("_detect_caller: 未识别的 clientInfo.name=%r，原样采用", ci_name)
+                return ci_name
+        except Exception:
+            pass
+
+    # 3. SSE / StreamableHTTP：从 ASGI request 取 User-Agent
     if ctx is not None:
         try:
             req_ctx = ctx.request_context
@@ -422,7 +448,7 @@ def _detect_caller(ctx: Context | None, fallback: str = "unknown") -> str:
         except Exception:
             pass
 
-    # 3. stdio 模式：看父进程名
+    # 4. stdio 模式：看父进程名
     try:
         ppid = os.getppid()
         if psutil is not None:
@@ -436,7 +462,7 @@ def _detect_caller(ctx: Context | None, fallback: str = "unknown") -> str:
     except Exception:
         pass
 
-    # 4. 环境变量 hint（部分客户端会注入）
+    # 5. 环境变量 hint（部分客户端会注入）
     env_hints = [
         ("KIMI_CODE", "kimicode"),
         ("CODEX", "codex"),
@@ -974,6 +1000,35 @@ async def dispatch_and_wait(
 
 # ---- 工具：spawn_subagent（核心！开一个真子 agent 进程）----
 
+
+async def _finalize_subagent(
+    task_id: str,
+    res: SubagentResult,
+    stats: dict[str, Any] | None = None,
+) -> None:
+    """子 agent 终态收口：存内存结果 + registry 死亡现场落盘 + webhook 推送。
+
+    status 语义：exit_code==0 → done，其余（含 None=退出码不可考）→ dead。
+    调用方之后用 subagent_status 能查到 exit_code/现场，不用自己盯进程。
+    """
+    assert _subagent_results is not None and _logger is not None
+    _subagent_results[task_id] = res
+    status = "done" if res.exit_code == 0 else "dead"
+    _registry_mark(task_id, status, result=res, stats=stats)
+    h = _subagents.get(task_id) if _subagents else None
+    await _fire_subagent_webhook(task_id, "subagent.done" if status == "done" else "subagent.failed", {
+        "status": status,
+        "exit_code": res.exit_code,
+        "exit_code_source": "real" if res.exit_code is not None else "unknown",
+        "duration_sec": round(res.duration_sec, 1),
+        "summary": (res.summary or "")[-1000:],
+        "stderr_tail": (res.stderr or "")[-2000:],
+        "peak_rss_mb": (stats or {}).get("peak_rss_mb"),
+        "peak_tokens": (stats or {}).get("peak_tokens"),
+        "log_file": str(h.output_file) if h and h.output_file else "",
+    })
+
+
 @mcp.tool()
 async def spawn_subagent(
     runtime: str,
@@ -984,6 +1039,7 @@ async def spawn_subagent(
     wait: bool = True,
     from_model: str = "unknown",
     reasoning_effort: str = "",
+    webhook: str = "",
     ctx: Context | None = None,
 ) -> str:
     """开一个真实的 CLI 子 agent 进程跑任务（这是 MCP Hub 的核心能力！）。
@@ -994,14 +1050,17 @@ async def spawn_subagent(
                传 "auto" / "fast" / "balanced" / "quality" 让 hub 根据 task 自动选择
         task: 给子 agent 的指令
         workdir: 子 agent 的工作目录
-        timeout_sec: 超时秒数
-        wait: True=阻塞等结果；False=立即返回 task_id
+        timeout_sec: 超时秒数（超时 hub 会 kill 直接子进程；opencode/codex 会自动续跑最多 2 次）
+        wait: True=阻塞等结果；False=立即返回 task_id（hub 后台继续守候，死亡现场落 registry）
         from_model: 调用方标识（未指定时自动识别调用方平台）
         reasoning_effort: 思考等级 none/minimal/low/medium/high/xhigh/max（是否可用取决于模型；仅 codex/opencode 等支持的 runtime 生效，其余忽略）
+        webhook: 可选，子 agent 终态时 POST 通知（subagent.done / subagent.failed），
+                 含 exit_code/duration/summary/peak_rss_mb/peak_tokens/log_file
 
     返回 JSON：
         - wait=True:  {ok, task_id, runtime, model, exit_code, summary, stdout, artifacts, duration_sec}
-        - wait=False: {ok, task_id, runtime, model, pid, started_at}
+        - wait=False: {ok, task_id, runtime, model, pid, started_at, log_file}
+          之后用 subagent_status(task_id) 查终态（exit_code/现场都在 registry 落盘）。
     """
     _init()
     assert _runtimes is not None and _aliases is not None and _logger is not None
@@ -1123,7 +1182,7 @@ async def spawn_subagent(
             reasoning_effort=reasoning_effort,
         )
         _subagents[task_id] = handle
-        _registry_register(handle, caller, reasoning_effort)
+        _registry_register(handle, caller, reasoning_effort, webhook=webhook)
         _logger.info("spawn_subagent id=%s runtime=%s model=%s pid=%s", task_id, runtime, model, handle.pid)
 
         async def _respawn_and_wait(mdl: str, suffix: str) -> SubagentResult:
@@ -1137,7 +1196,7 @@ async def spawn_subagent(
             _registry_register(h2, caller, reasoning_effort)
             r2 = await rt.wait(h2, timeout_sec)
             _subagent_results[tid2] = r2
-            _registry_mark(tid2, "done")
+            _registry_mark(tid2, "done", result=r2)
             return r2
 
         async def _resume_retry(res: SubagentResult, handle: SubagentHandle) -> SubagentResult:
@@ -1178,7 +1237,7 @@ async def spawn_subagent(
                 _registry_register(h2, caller, reasoning_effort)
                 res = await rt.wait(h2, timeout_sec)
                 _subagent_results[tid2] = res
-                _registry_mark(tid2, "done")
+                _registry_mark(tid2, "done", result=res)
                 note = f"[续跑] 第{attempt}次超时后自动续跑（session={session_id}）"
                 res.stderr = f"{note}\n{res.stderr or ''}".strip()
                 cur_handle = h2
@@ -1214,27 +1273,36 @@ async def spawn_subagent(
             async def _bg_wait() -> None:
                 # wait=False 也在后台等结果。输出已由 spawn 直接重定向到
                 # .log 文件（不再走 PIPE），所以不存在"没人 drain 管道导致
-                # 子进程堵死"的问题；这里只是等进程退出、解析日志、存终态。
+                # 子进程堵死"的问题；这里等进程退出、采样 RSS/tokens 峰值、
+                # 解析日志、死亡现场落 registry、按需推 webhook。
                 if _subagent_sem is not None:
                     await _subagent_sem.acquire()
+                stats: dict[str, Any] = {}
+                sampler = asyncio.create_task(
+                    _sample_process_stats(handle.pid, handle.output_file, stats)
+                )
                 try:
                     res = await rt.wait(handle, timeout_sec)
                     res = await _resume_retry(res, handle)
                     res = await _botcf_retry(res)
-                    _subagent_results[task_id] = res
-                    _registry_mark(task_id, "done")
+                    await _finalize_subagent(task_id, res, stats)
                     _logger.info(
-                        "spawn_subagent id=%s (background) done exit=%d duration=%.1fs",
+                        "spawn_subagent id=%s (background) done exit=%s duration=%.1fs",
                         task_id, res.exit_code, res.duration_sec,
                     )
                     if res.exit_code != 0:
                         _logger.warning(
-                            "spawn_subagent id=%s (background) failed exit=%d stderr=%.200s",
+                            "spawn_subagent id=%s (background) failed exit=%s stderr=%.200s",
                             task_id, res.exit_code, res.stderr or "",
                         )
                 except Exception:  # noqa: BLE001
                     _logger.exception("spawn_subagent id=%s background wait failed", task_id)
                 finally:
+                    sampler.cancel()
+                    try:
+                        await sampler
+                    except asyncio.CancelledError:
+                        pass
                     if _subagent_sem is not None:
                         _subagent_sem.release()
 
@@ -1247,15 +1315,27 @@ async def spawn_subagent(
                     "model": model,
                     "pid": handle.pid,
                     "started_at": handle.started_at,
+                    "log_file": str(handle.output_file) if handle.output_file else "",
                     "from_model": caller,
                 },
                 ensure_ascii=False,
             )
 
-        # 阻塞等
-        result = await rt.wait(handle, timeout_sec)
-        result = await _resume_retry(result, handle)
-        result = await _botcf_retry(result)
+        # 阻塞等（采样器同步盯 RSS/tokens 峰值，结束后落 registry）
+        stats: dict[str, Any] = {}
+        sampler = asyncio.create_task(
+            _sample_process_stats(handle.pid, handle.output_file, stats)
+        )
+        try:
+            result = await rt.wait(handle, timeout_sec)
+            result = await _resume_retry(result, handle)
+            result = await _botcf_retry(result)
+        finally:
+            sampler.cancel()
+            try:
+                await sampler
+            except asyncio.CancelledError:
+                pass
 
         # Antigravity Claude 模型容量不足时，自动回退到 Gemini
         if runtime == "antigravity" and _is_antigravity_capacity_error(result):
@@ -1279,7 +1359,7 @@ async def spawn_subagent(
                     _registry_register(fb_handle, caller, reasoning_effort)
                     fb_result = await rt.wait(fb_handle, timeout_sec)
                     _subagent_results[fb_task_id] = fb_result
-                    _registry_mark(fb_task_id, "done")
+                    _registry_mark(fb_task_id, "done", result=fb_result)
                     # 把回退信息注入 summary / stderr，让调用方知道发生过回退
                     warning = (
                         f"[警告] 请求的 Antigravity 模型 '{model}' 因服务端容量不足或超时（high traffic / 503 / timeout），"
@@ -1295,6 +1375,8 @@ async def spawn_subagent(
                         "spawn_subagent fallback id=%s done exit=%d duration=%.1fs",
                         fb_task_id, fb_result.exit_code, fb_result.duration_sec,
                     )
+                    # 原 task_id 也要收口（否则 registry 永远 running，下次重启变孤儿）
+                    await _finalize_subagent(task_id, fb_result, stats)
                     return json.dumps(
                         {
                             "ok": fb_result.exit_code == 0,
@@ -1345,7 +1427,7 @@ async def spawn_subagent(
                     _registry_register(sol_handle, caller, reasoning_effort)
                     sol_result = await sol_runtime.wait(sol_handle, timeout_sec)
                     _subagent_results[sol_task_id] = sol_result
-                    _registry_mark(sol_task_id, "done")
+                    _registry_mark(sol_task_id, "done", result=sol_result)
                     warning = (
                         f"[兜底] 原模型 '{model}'（runtime={runtime}）因超时或服务端错误失败，"
                         f"已自动回退到 codex/gpt-5.6-sol。"
@@ -1360,6 +1442,8 @@ async def spawn_subagent(
                         "spawn_subagent sol fallback id=%s done exit=%d duration=%.1fs",
                         sol_task_id, sol_result.exit_code, sol_result.duration_sec,
                     )
+                    # 原 task_id 也要收口（否则 registry 永远 running，下次重启变孤儿）
+                    await _finalize_subagent(task_id, sol_result, stats)
                     return json.dumps(
                         {
                             "ok": sol_result.exit_code == 0,
@@ -1380,8 +1464,7 @@ async def spawn_subagent(
                         f"{result.stderr or ''}\n[兜底失败] 尝试回退到 gpt-5.6-sol 时出错: {e}"
                     ).strip()
 
-        _subagent_results[task_id] = result
-        _registry_mark(task_id, "done")
+        await _finalize_subagent(task_id, result, stats)
         _logger.info(
             "spawn_subagent id=%s done exit=%d duration=%.1fs",
             task_id, result.exit_code, result.duration_sec,
@@ -1402,47 +1485,116 @@ async def spawn_subagent(
 
 @mcp.tool()
 async def subagent_status(task_id: str = "") -> str:
-    """看子 agent 状态。
+    """看子 agent 状态（以 registry 落盘记录为准，死后/重启后也可查）。
 
     参数:
-        task_id: 留空 = 列出所有子 agent；填 ID = 看单个详情
+        task_id: 留空 = 列出所有子 agent（新→旧，最多 50 条）；填 ID = 看单个详情
+
+    单个详情字段：status(running/done/dead) / exit_code / exit_code_source
+    （real=真实退出码，unknown=进程死透不可考，不再谎报 0）/ duration_sec /
+    summary / stderr_tail / peak_rss_mb / peak_tokens / log_file / caller /
+    webhook / resumed_from / is_alive / result（内存里有完整结果时带上）。
     """
     _init()
     _ensure_orphan_pollers()
     assert _subagents is not None
+    with _registry_lock():
+        reg = _registry_load_unlocked()
+    entries = reg.get("subagents", {})
+
     if task_id:
+        entry = entries.get(task_id)
         h = _subagents.get(task_id)
         r = _subagent_results.get(task_id)
-        if h is None:
-            return json.dumps({"ok": False, "error": "not found"})
-        info = {
-            "task_id": task_id,
-            "runtime": h.runtime,
-            "model": h.model,
-            "pid": h.pid,
-            "started_at": h.started_at,
-            "is_alive": _handle_alive(h),
-        }
-        if r is not None:
-            info["result"] = r.to_dict()
-        return json.dumps({"ok": True, "info": info}, ensure_ascii=False)
-
-    out = []
-    for tid, h in _subagents.items():
-        r = _subagent_results.get(tid)
-        out.append(
-            {
-                "task_id": tid,
+        if entry is None and h is None:
+            return json.dumps({"ok": False, "error": "not found"}, ensure_ascii=False)
+        info: dict[str, Any] = {"task_id": task_id}
+        if entry is not None:
+            info.update({
+                "runtime": entry.get("runtime"),
+                "model": entry.get("model"),
+                "pid": entry.get("pid"),
+                "status": entry.get("status"),
+                "started_at": entry.get("started_at"),
+                "finished_at": entry.get("finished_at"),
+                "duration_sec": entry.get("duration_sec"),
+                "exit_code": entry.get("exit_code"),
+                "exit_code_source": entry.get("exit_code_source"),
+                "summary": entry.get("summary"),
+                "stderr_tail": entry.get("stderr_tail"),
+                "error": entry.get("error"),
+                "peak_rss_mb": entry.get("peak_rss_mb"),
+                "peak_tokens": entry.get("peak_tokens"),
+                "log_file": entry.get("log_file"),
+                "workdir": entry.get("workdir"),
+                "caller": entry.get("caller"),
+                "webhook": entry.get("webhook"),
+                "resumed_from": entry.get("resumed_from"),
+            })
+        else:
+            # registry 里没有（极老的内存残留），退化为内存视图
+            info.update({
                 "runtime": h.runtime,
                 "model": h.model,
                 "pid": h.pid,
                 "started_at": h.started_at,
-                "is_alive": _handle_alive(h),
-                "finished": r is not None,
-                "exit_code": r.exit_code if r else None,
+                "status": "running" if r is None else ("done" if r.exit_code == 0 else "dead"),
+            })
+        if info.get("status") == "running":
+            if h is not None:
+                info["is_alive"] = _handle_alive(h)
+            elif info.get("pid"):
+                info["is_alive"] = _pid_alive(info["pid"])
+            else:
+                info["is_alive"] = False
+        else:
+            info["is_alive"] = False
+        if r is not None:
+            info["result"] = r.to_dict()
+        return json.dumps({"ok": True, "info": info}, ensure_ascii=False)
+
+    def _sort_key(item: tuple[str, Any]) -> float:
+        return item[1].get("started_at") or 0
+
+    out = []
+    for tid, entry in sorted(entries.items(), key=_sort_key, reverse=True)[:50]:
+        status = entry.get("status", "running")
+        if status == "running":
+            h = _subagents.get(tid)
+            if h is not None:
+                alive = _handle_alive(h)
+            elif entry.get("pid"):
+                alive = _pid_alive(entry["pid"])
+            else:
+                alive = False
+        else:
+            alive = False
+        r = _subagent_results.get(tid)
+        exit_code = entry.get("exit_code")
+        if exit_code is None and r is not None:
+            exit_code = r.exit_code
+        out.append(
+            {
+                "task_id": tid,
+                "runtime": entry.get("runtime"),
+                "model": entry.get("model"),
+                "pid": entry.get("pid"),
+                "started_at": entry.get("started_at"),
+                "status": status,
+                "is_alive": alive,
+                "finished": status != "running",
+                "exit_code": exit_code,
+                "duration_sec": entry.get("duration_sec"),
+                "caller": entry.get("caller"),
+                "peak_rss_mb": entry.get("peak_rss_mb"),
+                "peak_tokens": entry.get("peak_tokens"),
+                "log_file": entry.get("log_file"),
             }
         )
-    return json.dumps({"ok": True, "count": len(out), "subagents": out}, ensure_ascii=False)
+    return json.dumps(
+        {"ok": True, "total": len(entries), "count": len(out), "subagents": out},
+        ensure_ascii=False,
+    )
 
 
 # ---- 工具：杀掉子 agent ----
@@ -1468,6 +1620,188 @@ async def cancel_subagent(task_id: str) -> str:
         ok = _kill_pid(h.pid)
     _logger.info("cancel_subagent id=%s ok=%s", task_id, ok)
     return json.dumps({"ok": ok, "task_id": task_id}, ensure_ascii=False)
+
+
+# ---- 工具：续跑已死/中断的子 agent（死可续）----
+
+@mcp.tool()
+async def resume_subagent(
+    task_id: str,
+    task: str = "",
+    timeout_sec: int = 600,
+    wait: bool = True,
+    ctx: Context | None = None,
+) -> str:
+    """基于已死/中断任务的 session 续跑（runtime 需支持 resume）。
+
+    从 registry 拿原任务的 runtime/model/workdir/log_file，从日志提取
+    session id 后用同一 session 拉起新进程——复用原会话上下文，不用从头来。
+
+    参数:
+        task_id: 原任务 ID（registry 里要有记录，log_file 得还在）
+        task: 追加的续跑指令；留空 = 自动拼"基于当前进度继续完成原任务"
+        timeout_sec: 超时秒数
+        wait: True=阻塞等结果；False=立即返回新 task_id（后台守候，现场落 registry）
+
+    返回 JSON：{ok, task_id(新), resumed_from, session_id, ...}
+    """
+    _init()
+    assert _runtimes is not None and _logger is not None
+    with _registry_lock():
+        reg = _registry_load_unlocked()
+    entry = reg.get("subagents", {}).get(task_id)
+    if entry is None:
+        return json.dumps(
+            {"ok": False, "error": f"registry 里查不到任务 {task_id}（只有经本 hub spawn 的任务可续跑）"},
+            ensure_ascii=False,
+        )
+    rt = _runtimes.get(entry.get("runtime") or "")
+    if rt is None:
+        return json.dumps(
+            {"ok": False, "error": f"runtime '{entry.get('runtime')}' 当前不可用"},
+            ensure_ascii=False,
+        )
+    if not getattr(rt, "supports_resume", False):
+        return json.dumps(
+            {"ok": False, "error": f"runtime '{rt.name}' 不支持续跑（supports_resume=False）"},
+            ensure_ascii=False,
+        )
+    log_file = entry.get("log_file") or ""
+    if not log_file or not Path(log_file).exists():
+        return json.dumps(
+            {"ok": False, "error": f"原任务日志文件不存在（{log_file or '未记录'}），无法提取 session id"},
+            ensure_ascii=False,
+        )
+    probe = SubagentHandle(
+        pid=entry.get("pid"),
+        runtime=entry.get("runtime") or "",
+        model=entry.get("model") or "",
+        task_id=task_id,
+        workdir=entry.get("workdir") or ".",
+        started_at=entry.get("started_at") or 0.0,
+        output_file=Path(log_file),
+    )
+    session_id = rt.extract_session_id(probe)
+    if not session_id:
+        return json.dumps(
+            {"ok": False, "error": "从日志里提取不到 session id（任务可能没跑起来就死了）"},
+            ensure_ascii=False,
+        )
+
+    import uuid
+    new_id = uuid.uuid4().hex[:12]
+    model = entry.get("model") or ""
+    workdir = entry.get("workdir") or "."
+    orig_prompt = entry.get("prompt") or ""
+    if task:
+        prompt = task
+    else:
+        prompt = (
+            "（系统自动续跑：上次执行中断。请基于当前进度继续完成原任务，"
+            "不要从头开始；已产出的文件和分析直接复用。）\n\n原任务：\n" + orig_prompt
+        )
+    # 原 caller 是占位符（unknown/空）时重新探测，否则继承
+    caller = _detect_caller(ctx, entry.get("caller") or "unknown")
+
+    if _subagent_sem is not None:
+        await _subagent_sem.acquire()
+    try:
+        h2 = await rt.resume_spawn(
+            session_id=session_id,
+            task_id=new_id,
+            model=model,
+            task=prompt,
+            workdir=workdir,
+            timeout_sec=timeout_sec,
+        )
+        _subagents[new_id] = h2
+        _registry_register(
+            h2,
+            caller,
+            entry.get("reasoning_effort") or "",
+            webhook=entry.get("webhook") or "",
+            resumed_from=task_id,
+        )
+        _logger.info(
+            "resume_subagent id=%s resumed_from=%s session=%s pid=%s",
+            new_id, task_id, session_id, h2.pid,
+        )
+
+        if not wait:
+            async def _bg_wait() -> None:
+                if _subagent_sem is not None:
+                    await _subagent_sem.acquire()
+                stats: dict[str, Any] = {}
+                sampler = asyncio.create_task(
+                    _sample_process_stats(h2.pid, h2.output_file, stats)
+                )
+                try:
+                    res = await rt.wait(h2, timeout_sec)
+                    await _finalize_subagent(new_id, res, stats)
+                    _logger.info(
+                        "resume_subagent id=%s (background) done exit=%s duration=%.1fs",
+                        new_id, res.exit_code, res.duration_sec,
+                    )
+                except Exception:  # noqa: BLE001
+                    _logger.exception("resume_subagent id=%s background wait failed", new_id)
+                finally:
+                    sampler.cancel()
+                    try:
+                        await sampler
+                    except asyncio.CancelledError:
+                        pass
+                    if _subagent_sem is not None:
+                        _subagent_sem.release()
+
+            asyncio.create_task(_bg_wait())
+            return json.dumps(
+                {
+                    "ok": True,
+                    "task_id": new_id,
+                    "resumed_from": task_id,
+                    "session_id": session_id,
+                    "runtime": h2.runtime,
+                    "model": h2.model,
+                    "pid": h2.pid,
+                    "started_at": h2.started_at,
+                    "log_file": str(h2.output_file) if h2.output_file else "",
+                },
+                ensure_ascii=False,
+            )
+
+        stats: dict[str, Any] = {}
+        sampler = asyncio.create_task(
+            _sample_process_stats(h2.pid, h2.output_file, stats)
+        )
+        try:
+            res = await rt.wait(h2, timeout_sec)
+        finally:
+            sampler.cancel()
+            try:
+                await sampler
+            except asyncio.CancelledError:
+                pass
+        await _finalize_subagent(new_id, res, stats)
+        _logger.info(
+            "resume_subagent id=%s done exit=%s duration=%.1fs",
+            new_id, res.exit_code, res.duration_sec,
+        )
+        return json.dumps(
+            {
+                "ok": res.exit_code == 0,
+                "task_id": new_id,
+                "resumed_from": task_id,
+                "session_id": session_id,
+                "result": res.to_dict(),
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:  # noqa: BLE001
+        _logger.exception("resume_subagent failed")
+        return json.dumps({"ok": False, "task_id": new_id, "error": str(e)}, ensure_ascii=False)
+    finally:
+        if _subagent_sem is not None:
+            _subagent_sem.release()
 
 
 # ---- 工具：usage_stats（token / cost 用量聚合）----

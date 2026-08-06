@@ -79,6 +79,10 @@ class HubSettings(BaseSettings):
     minimax_base_url: str = "https://api.minimaxi.com/v1"
     minimax_model: str = "MiniMax-Text-01"
 
+    # ===== hedge-gateway（qwen 系多模态网关，OpenAI 兼容） =====
+    hedge_api_key: str = ""
+    hedge_base_url: str = ""  # 空 = 用 tools/hedge.py 的默认地址
+
     # ===== 通用自定义 =====
     custom_openai_api_key: str = ""
     custom_openai_base_url: str = ""

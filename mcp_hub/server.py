@@ -326,6 +326,17 @@ def _init() -> None:
             _logger.info("mmx 注入 api_key 成功（len=%d）", len(mmx_key))
         else:
             _logger.warning("mmx 没拿到 api_key，调用都会失败（需要 MMX_API_KEY 或 MINIMAX_API_KEY）")
+    # hedge-gateway：注入 .env 的 key/base_url（没有 key 网关回 401）
+    from .tools.hedge import HedgeAdapter
+    if "hedge" in _tools:
+        _tools["hedge"] = HedgeAdapter(
+            base_url=_settings.hedge_base_url,
+            api_key=_settings.hedge_api_key,
+        )
+        if _settings.hedge_api_key:
+            _logger.info("hedge 注入 api_key 成功（len=%d）", len(_settings.hedge_api_key))
+        else:
+            _logger.warning("hedge 没拿到 api_key（HEDGE_API_KEY），调用会 401")
     _aliases = _settings.model_aliases()
 
     # 并发信号量：0 = 不限
@@ -499,6 +510,8 @@ mcp = FastMCP(
         "8) list_tools / mmx_chat / mmx_image_generate / mmx_speech / mmx_music / "
         "mmx_search / mmx_vision / mmx_quota / mmx_voices / mmx_video_generate / mmx_video_get "
         "—— 多模态工具（mmx 文字/图像/语音/音乐/视频/搜索/看图）；"
+        "8b) hedge_vision / hedge_image_generate / hedge_video_generate / hedge_models "
+        "—— hedge-gateway（qwen 系视觉/生图/生视频，OpenAI 兼容）；"
         "9) list_workers / submit_cluster_task / scale_workers / cluster_stats "
         "—— 多 worker 集群（默认 DeepSeek V4 Flash via OpenCode Go 套餐，N 个 worker 并行）。"
         "完整使用说明见项目根目录 MCP_USAGE.md。"
@@ -2035,6 +2048,104 @@ async def mmx_video_get(task_id: str) -> str:
         task_id: mmx_video_generate 返回的 task_id
     """
     return await _mmx_call("video_get", task_id=task_id)
+
+
+# ---- 工具：hedge-gateway 多模态（qwen 系，OpenAI 兼容 HTTP）----
+
+async def _hedge_call(operation: str, **kwargs) -> str:
+    _init()
+    assert _tools is not None and _logger is not None
+    hedge = _tools.get("hedge")
+    if hedge is None:
+        return json.dumps(
+            {"ok": False, "error": "hedge 不可用（未配置 base_url）", "operation": operation},
+            ensure_ascii=False,
+        )
+    try:
+        result: ToolResult = await hedge.call(operation, **kwargs)
+        _logger.info(
+            "hedge.%s ok=%s duration=%.2fs",
+            operation, result.ok, result.duration_sec,
+        )
+        return json.dumps({"ok": result.ok, **result.to_dict()}, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        _logger.exception("hedge.%s 异常", operation)
+        return json.dumps({"ok": False, "operation": operation, "error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+async def hedge_vision(
+    image: str,
+    prompt: str = "",
+    model: str = "qwen3.8-max-thinking",
+    max_tokens: int = 4096,
+) -> str:
+    """hedge-gateway 看图理解（qwen 系视觉模型）。
+
+    参数:
+        image: 本地图片路径（自动转 base64，≤20MB）或 http(s) URL（网关代下载）
+        prompt: 提问（默认"描述这张图片"）
+        model: vision 模型（qwen3.8-max / qwen3.8-max-thinking / qwen3.8-128k /
+               qwen3.8-262k / qwen3.7-plus；更专门的 qwen3-vl-plus 也可用）
+        max_tokens: 最大输出 token
+    """
+    return await _hedge_call(
+        "vision", image=image, prompt=prompt, model=model, max_tokens=max_tokens,
+    )
+
+
+@mcp.tool()
+async def hedge_image_generate(
+    prompt: str,
+    size: str = "1024x1024",
+    n: int = 1,
+    out_dir: str = "",
+    out: str = "",
+    model: str = "",
+) -> str:
+    """hedge-gateway 生图（/v1/images/generations，已实测可用）。
+
+    参数:
+        prompt: 图像描述
+        size: 宽x高（如 "1024x1024"）
+        n: 张数
+        out_dir: 保存目录（推荐）
+        out: 保存到具体文件路径（仅 n=1）
+        model: 模型名（默认让网关自己选）
+    """
+    return await _hedge_call(
+        "image_generate", prompt=prompt, size=size, n=n,
+        out_dir=out_dir, out=out, model=model,
+    )
+
+
+@mcp.tool()
+async def hedge_video_generate(
+    prompt: str,
+    duration: int = 6,
+    resolution: str = "768P",
+    model: str = "",
+    out: str = "",
+) -> str:
+    """hedge-gateway 生视频。注意：网关侧 /v1/videos/generations 代码在未实测，尽力透传。
+
+    参数:
+        prompt: 视频描述
+        duration: 时长（秒）
+        resolution: 分辨率（如 "768P" / "1080P"）
+        model: 模型名（默认让网关自己选）
+        out: 若响应直接带视频数据则保存到此路径；异步任务型响应原样透传
+    """
+    return await _hedge_call(
+        "video_generate", prompt=prompt, duration=duration,
+        resolution=resolution, model=model, out=out,
+    )
+
+
+@mcp.tool()
+async def hedge_models() -> str:
+    """列出 hedge-gateway 当前可用的模型（GET /v1/models）。"""
+    return await _hedge_call("models")
 
 
 # ---- 工具：cluster（多 worker 集群）----

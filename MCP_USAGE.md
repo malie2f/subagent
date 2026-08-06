@@ -48,6 +48,7 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 | 批量派活给 worker 集群 | `submit_cluster_task` | `payload`, `pool` |
 | 看队列/任务状态 | `queue_status` | `task_id` 可选 |
 | 多模态（图/语音/视频/搜索） | `mmx_*` | 看各自参数 |
+| hedge 多模态（qwen 视觉/生图/生视频） | `hedge_vision`, `hedge_image_generate`, `hedge_video_generate`, `hedge_models` | `image`/`prompt`/`size` 等 |
 
 ---
 

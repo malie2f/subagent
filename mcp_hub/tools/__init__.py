@@ -7,10 +7,12 @@ tools/   是 request-response 的短任务，调用即等结果。
 from __future__ import annotations
 
 from .base import ToolAdapter, ToolResult
+from .hedge import HedgeAdapter
 from .mmx import MmxAdapter
 
 REGISTRY = {
     "mmx": MmxAdapter,
+    "hedge": HedgeAdapter,
 }
 
 
@@ -28,6 +30,7 @@ def detect_all() -> dict[str, ToolAdapter]:
 
 
 __all__ = [
+    "HedgeAdapter",
     "MmxAdapter",
     "REGISTRY",
     "ToolAdapter",

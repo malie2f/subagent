@@ -90,6 +90,14 @@
 
 - 无参数，返回 total / by_model / by_day 三组聚合；opencode/grok/codex/claude/zcode 有数据，其余 runtime 计入 tasks_without_usage。
 
+### hedge_* —— hedge-gateway 多模态（qwen 系，OpenAI 兼容）
+
+- `hedge_vision(image, prompt, model=qwen3.8-max-thinking)`：看图理解。`image` 给本地路径（自动 base64，≤20MB）或 http(s) URL（网关代下载）。vision 模型：qwen3.8-max / max-thinking / -128k / -262k、qwen3.7-plus、qwen3-vl-plus。
+- `hedge_image_generate(prompt, size, n, out_dir/out)`：生图落盘（已实测）。
+- `hedge_video_generate(prompt, duration, resolution, out)`：生视频（网关侧代码在未实测，响应原样透传）。
+- `hedge_models()`：列网关模型（130+，qwen3.5–3.8 全系含 -image/-video/-search 后缀）。
+- 网关要 key：hub `.env` 的 `HEDGE_API_KEY` / `HEDGE_BASE_URL`（缺 key 回 401）。
+
 ## 4. runtime ↔ model 配对表（2026-08-02 实测存活）
 
 | runtime | 可用 model | 分工 |

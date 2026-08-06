@@ -1,0 +1,326 @@
+"""hedge-gateway 多模态工具适配器 —— OpenAI 兼容 HTTP 网关（qwen 系）。
+
+默认地址 http://202.60.229.202:27941/v1（环境变量 HEDGE_BASE_URL 可覆盖；
+如网关将来要 key，设 HEDGE_API_KEY 会带 Authorization: Bearer）。
+
+支持的操作：
+  - vision          看图理解（chat/completions + image_url part；
+                    本地文件读 bytes 转 base64 data URI，http(s) URL 直传网关代下载）
+  - image_generate  生图（/v1/images/generations，b64/url 落盘）
+  - video_generate  生视频（/v1/videos/generations——网关侧代码在未实测，尽力透传）
+  - models          列模型（GET /v1/models）
+
+刻意不用 httpx：httpx 0.28+ 在 Windows + Python 3.14 有 502 bug（见 notify.py）。
+网关请求体上限 32MB，base64 膨胀 ~33%，故单图 raw 限 20MB（_MAX_IMAGE_BYTES）。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import http.client
+import json
+import mimetypes
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+from .base import ToolAdapter, ToolResult
+
+_DEFAULT_BASE_URL = "http://202.60.229.202:27941/v1"
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 网关 32MB 请求体上限，b64 膨胀 33% 后的安全线
+
+
+class HedgeAdapter(ToolAdapter):
+    name = "hedge"
+    binary = ""  # 纯 HTTP 服务，无本地 CLI
+
+    _OPERATIONS = ["vision", "image_generate", "video_generate", "models"]
+
+    def __init__(self, base_url: str = "", api_key: str = ""):
+        super().__init__()
+        import os
+
+        self._base_url = (
+            base_url or os.environ.get("HEDGE_BASE_URL") or _DEFAULT_BASE_URL
+        ).rstrip("/")
+        self._api_key = api_key or os.environ.get("HEDGE_API_KEY", "")
+        self._max_image_bytes = _MAX_IMAGE_BYTES
+
+    def is_available(self) -> bool:
+        # HTTP 服务没有"装没装"的概念；配了地址就算可用，通不通调用时见分晓
+        return bool(self._base_url)
+
+    def list_operations(self) -> list[str]:
+        return list(self._OPERATIONS)
+
+    def info(self) -> dict[str, Any]:
+        d = super().info()
+        d["base_url"] = self._base_url
+        d["has_api_key"] = bool(self._api_key)
+        return d
+
+    # ---------- 内部：HTTP ----------
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        timeout: int = 120,
+    ) -> tuple[int, Any]:
+        """同步 HTTP（在 to_thread 里跑）。返回 (status, json或text)。"""
+        p = urlparse(self._base_url)
+        host = p.hostname or "127.0.0.1"
+        port = p.port or (443 if p.scheme == "https" else 80)
+        prefix = p.path.rstrip("/")
+        full_path = f"{prefix}{path}"
+        payload = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        conn_cls = http.client.HTTPSConnection if p.scheme == "https" else http.client.HTTPConnection
+        conn = conn_cls(host, port, timeout=timeout)
+        try:
+            conn.request(method, full_path, body=payload, headers=headers)
+            r = conn.getresponse()
+            raw = r.read()
+            text = raw.decode("utf-8", errors="replace")
+            try:
+                return r.status, json.loads(text)
+            except json.JSONDecodeError:
+                return r.status, text
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _err(operation: str, started: float, msg: str) -> ToolResult:
+        return ToolResult(
+            tool="hedge", operation=operation, ok=False,
+            error=msg, duration_sec=time.time() - started,
+        )
+
+    def _image_to_uri(self, image: str) -> str:
+        """本地路径 → base64 data URI；http(s) → 原样（网关代下载，30s/20MB 上限）。"""
+        if image.startswith(("http://", "https://")):
+            return image
+        path = Path(image)
+        if not path.exists():
+            raise ValueError(f"图片不存在: {image}（也不是 http(s) URL）")
+        size = path.stat().st_size
+        if size > self._max_image_bytes:
+            raise ValueError(
+                f"图片 {size / 1024 / 1024:.1f}MB 超过 {self._max_image_bytes / 1024 / 1024:.0f}MB 上限"
+                "（网关请求体 32MB，base64 膨胀 ~33%）"
+            )
+        mime = mimetypes.guess_type(path.name)[0] or "image/png"
+        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+
+    # ---------- 操作 ----------
+
+    async def call(self, operation: str, **kwargs: Any) -> ToolResult:
+        started = time.time()
+        if operation == "vision":
+            return await self._vision(started, **kwargs)
+        if operation == "image_generate":
+            return await self._image_generate(started, **kwargs)
+        if operation == "video_generate":
+            return await self._video_generate(started, **kwargs)
+        if operation == "models":
+            return await self._models(started)
+        return self._err(operation, started, f"未知操作: {operation}")
+
+    async def _vision(
+        self,
+        started: float,
+        image: str = "",
+        prompt: str = "",
+        model: str = "qwen3.8-max-thinking",
+        max_tokens: int = 4096,
+        **_: Any,
+    ) -> ToolResult:
+        if not image:
+            return self._err("vision", started, "缺参数 image（本地路径或 http(s) URL）")
+        try:
+            uri = self._image_to_uri(image)
+        except (ValueError, OSError) as e:
+            return self._err("vision", started, str(e))
+        body = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt or "描述这张图片"},
+                        {"type": "image_url", "image_url": {"url": uri}},
+                    ],
+                }
+            ],
+            "max_tokens": max_tokens,
+        }
+        try:
+            status, data = await asyncio.to_thread(
+                self._request, "POST", "/chat/completions", body, 180
+            )
+        except Exception as e:  # noqa: BLE001
+            return self._err("vision", started, f"请求失败: {e}")
+        if status != 200 or not isinstance(data, dict):
+            return self._err("vision", started, f"HTTP {status}: {str(data)[:500]}")
+        try:
+            content = data["choices"][0]["message"]["content"]
+            if isinstance(content, list):  # 有的实现把 content 拆成 parts
+                content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+        except (KeyError, IndexError, TypeError):
+            return self._err("vision", started, f"响应结构异常: {str(data)[:500]}")
+        return ToolResult(
+            tool=self.name, operation="vision", ok=True,
+            data={"content": content, "model": data.get("model", model), "usage": data.get("usage")},
+            duration_sec=time.time() - started,
+        )
+
+    async def _image_generate(
+        self,
+        started: float,
+        prompt: str = "",
+        size: str = "1024x1024",
+        n: int = 1,
+        out_dir: str = "",
+        out: str = "",
+        model: str = "",
+        **_: Any,
+    ) -> ToolResult:
+        if not prompt:
+            return self._err("image_generate", started, "缺参数 prompt")
+        body: dict[str, Any] = {"prompt": prompt, "n": max(1, n), "size": size}
+        if model:
+            body["model"] = model
+        try:
+            status, data = await asyncio.to_thread(
+                self._request, "POST", "/images/generations", body, 300
+            )
+        except Exception as e:  # noqa: BLE001
+            return self._err("image_generate", started, f"请求失败: {e}")
+        if status != 200 or not isinstance(data, dict):
+            return self._err("image_generate", started, f"HTTP {status}: {str(data)[:500]}")
+        items = data.get("data") or []
+        if not items:
+            return self._err("image_generate", started, f"响应无 data: {str(data)[:500]}")
+        saved = await self._save_images(items, out=out, out_dir=out_dir, started=started, op="image_generate")
+        if isinstance(saved, ToolResult):
+            return saved
+        return ToolResult(
+            tool=self.name, operation="image_generate", ok=True,
+            data={"saved": saved}, duration_sec=time.time() - started,
+            files=saved,
+        )
+
+    async def _video_generate(
+        self,
+        started: float,
+        prompt: str = "",
+        duration: int = 6,
+        resolution: str = "768P",
+        model: str = "",
+        out: str = "",
+        **_: Any,
+    ) -> ToolResult:
+        """生视频。注意：网关侧 /v1/videos/generations 代码在未实测，这里尽力透传。"""
+        if not prompt:
+            return self._err("video_generate", started, "缺参数 prompt")
+        body: dict[str, Any] = {"prompt": prompt, "duration": duration, "resolution": resolution}
+        if model:
+            body["model"] = model
+        try:
+            status, data = await asyncio.to_thread(
+                self._request, "POST", "/videos/generations", body, 600
+            )
+        except Exception as e:  # noqa: BLE001
+            return self._err("video_generate", started, f"请求失败: {e}")
+        if status != 200 or not isinstance(data, dict):
+            return self._err("video_generate", started, f"HTTP {status}: {str(data)[:500]}")
+        # 异步任务型响应（带 task_id/id）直接透传，调用方自行轮询
+        items = data.get("data") or []
+        saved: list[str] = []
+        if items and out:
+            maybe = await self._save_images(items, out=out, out_dir="", started=started, op="video_generate")
+            if not isinstance(maybe, ToolResult):
+                saved = maybe
+        return ToolResult(
+            tool=self.name, operation="video_generate", ok=True,
+            data={"response": data, "saved": saved},
+            duration_sec=time.time() - started, files=saved,
+        )
+
+    async def _models(self, started: float) -> ToolResult:
+        try:
+            status, data = await asyncio.to_thread(self._request, "GET", "/models", None, 30)
+        except Exception as e:  # noqa: BLE001
+            return self._err("models", started, f"请求失败: {e}")
+        if status != 200 or not isinstance(data, dict):
+            return self._err("models", started, f"HTTP {status}: {str(data)[:500]}")
+        ids = [m.get("id") for m in data.get("data", []) if isinstance(m, dict)]
+        return ToolResult(
+            tool=self.name, operation="models", ok=True,
+            data={"models": ids, "raw": data},
+            duration_sec=time.time() - started,
+        )
+
+    async def _save_images(
+        self,
+        items: list[dict],
+        *,
+        out: str,
+        out_dir: str,
+        started: float,
+        op: str,
+    ) -> list[str] | ToolResult:
+        """把 OpenAI 风格的 data[]（b64_json 或 url）落盘，返回路径列表；失败返回 ToolResult。"""
+        saved: list[str] = []
+        target_dir = Path(out_dir) if out_dir else (Path(out).parent if out else Path("."))
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return self._err(op, started, f"创建输出目录失败: {e}")
+        for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            dest = Path(out) if (out and len(items) == 1) else target_dir / f"image_{i + 1:03d}.png"
+            if item.get("b64_json"):
+                try:
+                    dest.write_bytes(base64.b64decode(item["b64_json"]))
+                except (ValueError, OSError) as e:
+                    return self._err(op, started, f"写文件失败 {dest}: {e}")
+            elif item.get("url"):
+                try:
+                    blob = await asyncio.to_thread(self._download, item["url"])
+                    dest.write_bytes(blob)
+                except Exception as e:  # noqa: BLE001
+                    return self._err(op, started, f"下载失败 {item['url']}: {e}")
+            else:
+                continue
+            saved.append(str(dest))
+        if not saved:
+            return self._err(op, started, f"data 里没有 b64_json/url 可保存: {str(items)[:300]}")
+        return saved
+
+    @staticmethod
+    def _download(url: str, timeout: int = 120) -> bytes:
+        p = urlparse(url)
+        host = p.hostname or "127.0.0.1"
+        port = p.port or (443 if p.scheme == "https" else 80)
+        path = p.path or "/"
+        if p.query:
+            path += "?" + p.query
+        conn_cls = http.client.HTTPSConnection if p.scheme == "https" else http.client.HTTPConnection
+        conn = conn_cls(host, port, timeout=timeout)
+        try:
+            conn.request("GET", path)
+            r = conn.getresponse()
+            if r.status != 200:
+                raise OSError(f"HTTP {r.status}")
+            return r.read()
+        finally:
+            conn.close()

@@ -80,6 +80,7 @@ def test_registry_mark_roundtrip(hub_reg: Path) -> None:
         runtime=h.runtime, model=h.model, task_id="t1",
         exit_code=3, stdout="", stderr="boom\n" * 500, duration_sec=12.34,
         summary="挂了" * 600, error=None, prompt=h.prompt,
+        session_id="conv-xyz-123",
     )
     reg._registry_mark("t1", "dead", result=res, stats={"peak_rss_mb": 812.345, "peak_tokens": 200684})
 
@@ -90,6 +91,7 @@ def test_registry_mark_roundtrip(hub_reg: Path) -> None:
     assert entry["duration_sec"] == 12.3
     assert entry["peak_rss_mb"] == 812.3
     assert entry["peak_tokens"] == 200684
+    assert entry["session_id"] == "conv-xyz-123"
     assert entry["webhook"] == "http://127.0.0.1:9/hook"
     assert entry["caller"] == "kimicode"
     # 截断：summary 留尾 1000 字符、stderr 留尾 2000 字符

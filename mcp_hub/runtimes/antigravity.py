@@ -51,6 +51,9 @@ MIN_VERSION = (1, 1, 9)
 # 认证状态探测缓存 TTL（秒）
 _AUTH_TTL = 60.0
 
+# 最终 JSON 里的会话 id（SUCCESS/ERROR 输出都带）
+_CONVERSATION_ID_RE = re.compile(r'"conversation_id"\s*:\s*"([^"]+)"')
+
 # 未登录 CLI 的典型输出片段（不区分大小写）
 _UNAUTH_PATTERNS = (
     "please sign in",
@@ -65,6 +68,7 @@ _UNAUTH_PATTERNS = (
 class AntigravityAdapter(RuntimeAdapter):
     name = "antigravity"
     binary = "antigravity"
+    supports_resume: bool = True
 
     def __init__(self) -> None:
         super().__init__()
@@ -132,6 +136,44 @@ class AntigravityAdapter(RuntimeAdapter):
         reasoning_effort: str = "",
     ) -> SubagentHandle:
         """fork 一个 `antigravity --print` 进程。"""
+        return await self._spawn_impl(task_id, model, task, workdir, timeout_sec)
+
+    # ---- 会话续跑（--conversation，v1.1.9+ 实测支持） ----
+
+    def extract_session_id(self, handle: SubagentHandle) -> str | None:
+        """从日志的最终 JSON 里提取 conversation_id（SUCCESS/ERROR 输出都有）。"""
+        if handle.output_file is None:
+            return None
+        try:
+            text = handle.output_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        m = _CONVERSATION_ID_RE.search(text)
+        return m.group(1) if m else None
+
+    async def resume_spawn(
+        self,
+        session_id: str,
+        task_id: str,
+        model: str,
+        task: str,
+        workdir: str,
+        timeout_sec: int = 600,
+    ) -> SubagentHandle:
+        """用 --conversation 续跑同一会话（task 由 server 拼好）。"""
+        return await self._spawn_impl(
+            task_id, model, task, workdir, timeout_sec, conversation_id=session_id,
+        )
+
+    async def _spawn_impl(
+        self,
+        task_id: str,
+        model: str,
+        task: str,
+        workdir: str,
+        timeout_sec: int,
+        conversation_id: str = "",
+    ) -> SubagentHandle:
         out_dir = Path(workdir) / ".mcp-hub" / "subagents"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / f"{task_id}.log"
@@ -155,6 +197,12 @@ class AntigravityAdapter(RuntimeAdapter):
         model = model.split("\t")[0].strip() if model else model
         if model:
             cmd += ["--model", model]
+        if conversation_id:
+            cmd += ["--conversation", conversation_id]
+        # CLI 的 print 等待上限默认 5m——长任务会被它先杀掉（"timeout waiting
+        # for response"）。设成略小于 hub 的 timeout_sec：CLI 先一步打印 ERROR
+        # JSON（带 conversation_id，可续跑）再退出，而不是被 hub 无日志强杀。
+        cmd += ["--print-timeout", f"{max(timeout_sec - 15, 30)}s"]
         # 整段 JSON 输出（含 usage），wait() 优先按 JSON 解析、失败回退文本路径
         cmd += ["--output-format", "json"]
         cmd.append("--dangerously-skip-permissions")
@@ -232,6 +280,15 @@ class AntigravityAdapter(RuntimeAdapter):
         if handle.output_file:
             write_transcript(handle, handle.prompt, transcript)
 
+        # 会话映射：conversation_id 进结果（registry 落盘后 status/resume 都能用）
+        m = _CONVERSATION_ID_RE.search(clean_stdout)
+        session_id = m.group(1) if m else ""
+        # stderr 为空但进程失败时，把 JSON 里的 error 字段（如 "timeout waiting
+        # for response"）浮上 result.error——_is_timeout_error 靠它触发自动续跑
+        error = None
+        if proc.returncode != 0:
+            error = clean_stderr or _extract_json_error(clean_stdout) or None
+
         return SubagentResult(
             runtime=handle.runtime,
             model=handle.model,
@@ -242,9 +299,10 @@ class AntigravityAdapter(RuntimeAdapter):
             duration_sec=time.time() - started,
             summary=summary,
             artifacts=artifacts,
-            error=clean_stderr if proc.returncode != 0 else None,
+            error=error,
             prompt=handle.prompt,
             transcript=transcript,
+            session_id=session_id,
         )
 
     async def cancel(self, handle: SubagentHandle) -> bool:
@@ -353,6 +411,16 @@ def _extract_json_obj(stdout: str) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
+def _extract_json_error(stdout: str) -> str:
+    """从最终 JSON 里取 error 字段（ERROR 输出时 CLI 写在 stdout 的 JSON 里，
+    stderr 反而是空的）。"""
+    obj = _extract_json_obj(stdout)
+    if obj is None:
+        return ""
+    v = obj.get("error")
+    return v.strip() if isinstance(v, str) else ""
+
+
 # usage 字段映射（以 v1.1.9 实测输出为准）：
 #   input_tokens→input, output_tokens→output, thinking_tokens→reasoning,
 #   total_tokens→total（缺失时 input+output 兜底）, cache_read_tokens→cache.read
@@ -436,8 +504,12 @@ def _parse_json_output(
         })
 
     status = obj.get("status")
+    obj_error = obj.get("error")
     if exit_code != 0 and stderr:
         events.append({"type": "error", "message": stderr[-2000:]})
+    elif isinstance(obj_error, str) and obj_error.strip():
+        # CLI ERROR 输出的真实错误消息（写在 JSON 里，如 "timeout waiting for response"）
+        events.append({"type": "error", "message": obj_error.strip()[-2000:]})
     elif isinstance(status, str) and status and status.upper() != "SUCCESS":
         events.append({"type": "error", "message": f"antigravity status={status}"})
 

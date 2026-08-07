@@ -165,6 +165,8 @@ class SubagentResult:
     # v3 新增
     prompt: str = ""
     transcript: list[dict[str, Any]] = field(default_factory=list)
+    # 会话映射：runtime 侧的原生 session/conversation id（有就填，没有留空）
+    session_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +182,7 @@ class SubagentResult:
             "error": self.error,
             "prompt": self.prompt,
             "transcript": self.transcript,
+            "session_id": self.session_id,
         }
 
 

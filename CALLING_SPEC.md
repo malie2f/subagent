@@ -54,10 +54,10 @@
 ### subagent_status —— 查状态（registry 落盘为准，死后/重启后可查）
 
 - `task_id` 留空 = 列表（新→旧最多 50 条，`total` 是 registry 总条数）；填 ID = 单条详情。
-- 详情字段：`status`(running/done/dead) / `exit_code` / `exit_code_source`（real=真实退出码，unknown=进程死透不可考，**不再谎报 0**）/ `duration_sec` / `summary` / `stderr_tail` / `peak_rss_mb` / `peak_tokens` / `log_file` / `caller` / `webhook` / `resumed_from` / `is_alive` / `result`（内存里有完整结果时带）。
+- 详情字段：`status`(running/done/dead) / `exit_code` / `exit_code_source`（real=真实退出码，unknown=进程死透不可考，**不再谎报 0**）/ `duration_sec` / `summary` / `stderr_tail` / `peak_rss_mb` / `peak_tokens` / `session_id`（runtime 原生会话 id，antigravity 的 conversation_id 也映射在这）/ `log_file` / `caller` / `webhook` / `resumed_from` / `is_alive` / `result`（内存里有完整结果时带）。
 - `peak_tokens` 是日志里 step-finish 的 context tokens 峰值——zen-v4f 免费池 ~200k 会猝死，盯它判断该不该拆任务。
 
-### resume_subagent —— 死可续（opencode/codex/grok/qoder/codebuddy）
+### resume_subagent —— 死可续（opencode/codex/grok/qoder/codebuddy/antigravity）
 
 ```json
 {
@@ -69,6 +69,7 @@
 ```
 
 - 从原任务日志提取 session id，用同一 session 拉起新进程（复用上下文，不用从头来）。
+- 优先用 registry 里落盘的 `session_id`（任务终态时已从结果映射进来）；没有再读日志提取。
 - 返回新 `task_id` + `session_id` + `resumed_from`；新任务的 status/webhook 行为与 spawn 一致。
 - 失败情形都有明确中文报错：registry 查不到 / runtime 不支持 resume / 日志文件没了 / 提取不到 session id。
 

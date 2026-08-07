@@ -176,3 +176,80 @@ def test_list_models_strips_tab_display_names(monkeypatch):
         "claude-sonnet-4-6",
         "bare-id-line",
     ]
+
+
+# 2026-08-08 06:33 真实死亡现场（timeout waiting for response，403k tokens）
+AG_ERROR_JSON_LINE = (
+    '{"conversation_id":"c5ff7611-5f19-4911-ab89-6c60291f4dea","status":"ERROR",'
+    '"response":"","error":"timeout waiting for response","duration_seconds":299.7221408,'
+    '"num_turns":1,"usage":{"input_tokens":361746,"output_tokens":42026,'
+    '"thinking_tokens":29999,"cache_read_tokens":3182759,"total_tokens":403772}}'
+)
+
+
+def test_error_json_surfaces_real_error_message():
+    """ERROR 输出：error event 带真实消息（不再是泛泛的 status=ERROR），usage 仍在。"""
+    from mcp_hub.runtimes.antigravity import _parse_json_output
+
+    parsed = _parse_json_output(AG_ERROR_JSON_LINE, "", 1)
+    assert parsed is not None
+    events, summary, artifacts = parsed
+    assert summary == ""  # response 为空
+    errors = [e for e in events if e["type"] == "error"]
+    assert errors and errors[0]["message"] == "timeout waiting for response"
+    usage = [e for e in events if e["type"] == "usage"]
+    assert usage and usage[0]["tokens"]["total"] == 403772
+
+
+def test_extract_json_error():
+    from mcp_hub.runtimes.antigravity import _extract_json_error
+
+    assert _extract_json_error(AG_ERROR_JSON_LINE) == "timeout waiting for response"
+    assert _extract_json_error(AG_JSON_LINE) == ""  # SUCCESS 无 error 字段
+    assert _extract_json_error("not json at all") == ""
+
+
+def test_extract_session_id_from_log(tmp_path):
+    """日志（含实时日志头 + 最终 JSON）里能提取 conversation_id。"""
+    from mcp_hub.runtimes.antigravity import AntigravityAdapter
+    from mcp_hub.runtimes.base import SubagentHandle
+
+    log = tmp_path / "dead.log"
+    log.write_text(
+        "=== 实时日志 (2026-08-08 06:33:56) ===\n" + AG_ERROR_JSON_LINE + "\n",
+        encoding="utf-8",
+    )
+    h = SubagentHandle(
+        pid=None, runtime="antigravity", model="gemini-3.6-flash-high",
+        task_id="t", workdir=str(tmp_path), started_at=0.0, output_file=log,
+    )
+    assert AntigravityAdapter().extract_session_id(h) == "c5ff7611-5f19-4911-ab89-6c60291f4dea"
+
+
+async def test_spawn_cmds_print_timeout_and_conversation(monkeypatch, tmp_path):
+    """spawn 注入 --print-timeout（略小于 hub 超时）；resume 额外带 --conversation。"""
+    from mcp_hub.runtimes import antigravity as ag
+    from types import SimpleNamespace
+
+    adapter = ag.AntigravityAdapter()
+    monkeypatch.setattr(adapter, "_resolve_cmd", lambda: "/fake/agy")
+    monkeypatch.setattr(adapter, "_ensure_auth", lambda b: True)
+
+    captured: list[list[str]] = []
+
+    async def fake_exec(*cmd, **kwargs):
+        captured.append(list(cmd))
+        return SimpleNamespace(pid=43210)
+
+    monkeypatch.setattr(ag.asyncio, "create_subprocess_exec", fake_exec)
+
+    await adapter.spawn("t1", "gemini-3.6-flash-low", "任务", str(tmp_path), 600)
+    cmd1 = captured[0]
+    assert "--print-timeout" in cmd1
+    assert cmd1[cmd1.index("--print-timeout") + 1] == "585s"  # 600-15
+    assert "--conversation" not in cmd1
+
+    await adapter.resume_spawn("conv-abc", "t2", "gemini-3.6-flash-low", "继续", str(tmp_path), 300)
+    cmd2 = captured[1]
+    assert cmd2[cmd2.index("--conversation") + 1] == "conv-abc"
+    assert cmd2[cmd2.index("--print-timeout") + 1] == "285s"  # 300-15

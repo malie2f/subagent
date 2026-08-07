@@ -1538,6 +1538,7 @@ async def subagent_status(task_id: str = "") -> str:
                 "error": entry.get("error"),
                 "peak_rss_mb": entry.get("peak_rss_mb"),
                 "peak_tokens": entry.get("peak_tokens"),
+                "session_id": entry.get("session_id"),
                 "log_file": entry.get("log_file"),
                 "workdir": entry.get("workdir"),
                 "caller": entry.get("caller"),
@@ -1679,25 +1680,29 @@ async def resume_subagent(
             {"ok": False, "error": f"runtime '{rt.name}' 不支持续跑（supports_resume=False）"},
             ensure_ascii=False,
         )
-    log_file = entry.get("log_file") or ""
-    if not log_file or not Path(log_file).exists():
-        return json.dumps(
-            {"ok": False, "error": f"原任务日志文件不存在（{log_file or '未记录'}），无法提取 session id"},
-            ensure_ascii=False,
+    # 优先用 registry 里落盘的 session_id（终态时已从结果映射进来）；
+    # 没有再从原任务日志提取（日志还在的话）
+    session_id = entry.get("session_id") or ""
+    if not session_id:
+        log_file = entry.get("log_file") or ""
+        if not log_file or not Path(log_file).exists():
+            return json.dumps(
+                {"ok": False, "error": f"registry 无 session_id 且日志文件不存在（{log_file or '未记录'}），无法续跑"},
+                ensure_ascii=False,
+            )
+        probe = SubagentHandle(
+            pid=entry.get("pid"),
+            runtime=entry.get("runtime") or "",
+            model=entry.get("model") or "",
+            task_id=task_id,
+            workdir=entry.get("workdir") or ".",
+            started_at=entry.get("started_at") or 0.0,
+            output_file=Path(log_file),
         )
-    probe = SubagentHandle(
-        pid=entry.get("pid"),
-        runtime=entry.get("runtime") or "",
-        model=entry.get("model") or "",
-        task_id=task_id,
-        workdir=entry.get("workdir") or ".",
-        started_at=entry.get("started_at") or 0.0,
-        output_file=Path(log_file),
-    )
-    session_id = rt.extract_session_id(probe)
+        session_id = rt.extract_session_id(probe) or ""
     if not session_id:
         return json.dumps(
-            {"ok": False, "error": "从日志里提取不到 session id（任务可能没跑起来就死了）"},
+            {"ok": False, "error": "拿不到 session id（任务可能没跑起来就死了）"},
             ensure_ascii=False,
         )
 

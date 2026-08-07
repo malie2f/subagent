@@ -133,10 +133,11 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 
 ## 5. 长任务 / 超时续跑
 
-子 agent 超时会被 kill，但 **opencode / codex / qoder / codebuddy / grok 支持原生 session 续跑**：
+子 agent 超时会被 kill，但 **opencode / codex / qoder / codebuddy / grok / antigravity 支持原生 session 续跑**：
 
 - hub 自动用同一 session 续跑最多 2 次
-- 死了也能手动续：`resume_subagent(task_id=...)`——从原任务日志提取 session id，同一 session 拉起新进程，返回新 task_id + `resumed_from`；`task` 留空时自动拼"基于当前进度继续"
+- 死了也能手动续：`resume_subagent(task_id=...)`——从 registry 落盘的 `session_id`（或原任务日志）拿会话 id，同一 session 拉起新进程，返回新 task_id + `resumed_from`；`task` 留空时自动拼"基于当前进度继续"
+- antigravity（Gemini）特别说明：CLI 的 `--print-timeout` 默认 5m 会先手杀掉长任务（"timeout waiting for response"）。hub 现在把它设成略小于你的 `timeout_sec`，让 CLI 先一步打印带 conversation_id 的 ERROR JSON——超时后会**自动带全上下文续跑**，不再是死局
 - 你也可以在 dashboard 里点「手动续跑」继续给指令
 
 所以长任务建议：

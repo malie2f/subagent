@@ -194,6 +194,8 @@ def _registry_mark(
                 entry["exit_code"] = result.exit_code
                 entry["exit_code_source"] = "real" if result.exit_code is not None else "unknown"
                 entry["duration_sec"] = round(result.duration_sec, 1)
+                if result.session_id:
+                    entry["session_id"] = result.session_id
                 if result.summary:
                     entry["summary"] = result.summary[-1000:]
                 if result.stderr:

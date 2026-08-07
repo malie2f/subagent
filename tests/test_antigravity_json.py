@@ -147,3 +147,32 @@ def test_error_status_and_exit_code():
     assert "error" in types
     err = [e for e in events if e["type"] == "error"][0]
     assert err["message"] == "boom"
+
+
+def test_list_models_strips_tab_display_names(monkeypatch):
+    """CLI 新版 `antigravity models` 输出 "id\tDisplay Name"：只留 id，
+    否则 hub 精确匹配校验过不了、--model 传 tab 名 CLI 不认。"""
+    from mcp_hub.runtimes import antigravity as ag
+
+    adapter = ag.AntigravityAdapter()
+    monkeypatch.setattr(adapter, "_resolve_cmd", lambda: "/fake/agy")
+    monkeypatch.setattr(adapter, "_ensure_auth", lambda b: True)
+
+    class FakeProc:
+        returncode = 0
+        stdout = (
+            "gemini-3.6-flash-low\tGemini 3.6 Flash (Low)\n"
+            "gemini-3.1-pro-high\tGemini 3.1 Pro (High)\n"
+            "claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n"
+            "bare-id-line\n"
+        )
+        stderr = ""
+
+    monkeypatch.setattr(ag.subprocess, "run", lambda *a, **k: FakeProc())
+    models = adapter.list_models()
+    assert models == [
+        "gemini-3.6-flash-low",
+        "gemini-3.1-pro-high",
+        "claude-sonnet-4-6",
+        "bare-id-line",
+    ]

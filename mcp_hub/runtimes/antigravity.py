@@ -102,7 +102,15 @@ class AntigravityAdapter(RuntimeAdapter):
                 env=_antigravity_env(),
             )
             if proc.returncode == 0:
-                models = [m.strip() for m in proc.stdout.splitlines() if m.strip()]
+                # CLI 新版输出 "id\tDisplay Name" 两行格式（如
+                # "gemini-3.6-flash-low\tGemini 3.6 Flash (Low)"）。
+                # 只留 id：hub 的模型校验是精确匹配，spawn 的 --model 也只认 id；
+                # 带 \t 原样返回会让裸名过不了校验、带 tab 名 CLI 不认。
+                models = [
+                    m.strip().split("\t")[0].strip()
+                    for m in proc.stdout.splitlines()
+                    if m.strip() and m.strip().split("\t")[0].strip()
+                ]
                 self._models_cache = models
                 self._models_cached_at = now
                 return list(models)
@@ -143,6 +151,8 @@ class AntigravityAdapter(RuntimeAdapter):
         # 命令顺序是实测结果：--print 后面必须紧跟 task，否则模型会把 flag 当 prompt
         cmd = [binary, "--print", task]
         cmd += ["--add-dir", str(Path(workdir).resolve())]
+        # 防御：调用方可能照 list_runtimes 旧输出抄来 "id\tDisplay Name"，只取 id
+        model = model.split("\t")[0].strip() if model else model
         if model:
             cmd += ["--model", model]
         # 整段 JSON 输出（含 usage），wait() 优先按 JSON 解析、失败回退文本路径

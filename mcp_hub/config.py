@@ -26,10 +26,10 @@ class ModelAlias(BaseModel):
     """逻辑模型名 → 真实 provider/model 的映射，支持 fallback 优先级。
 
     例：
-      {"alias": "deepseek", "candidates": ["opencode-go/deepseek-v4-pro",
+      {"alias": "deepseek", "candidates": ["deepseek/deepseek-v4-pro",
+                                              "opencode-go/deepseek-v4-pro",
                                               "opencode-go/deepseek-v4-flash",
-                                              "opencode/deepseek-v4-flash-free",
-                                              "botcf/deepseek-v4-pro"]}
+                                              "opencode/deepseek-v4-flash-free"]}
     """
 
     alias: str
@@ -338,11 +338,13 @@ class HubSettings(BaseSettings):
             except (json.JSONDecodeError, TypeError) as e:
                 print(f"[hub] 解析 hub_model_aliases_json 失败: {e}", flush=True)
 
-        # 默认 alias 列表 —— 优先用 OpenCode Go/Zen 套餐（用户订阅）
+        # 默认 alias 列表 —— deepseek 优先官方 API（v4-pro 正式版，需 DEEPSEEK_API_KEY），
+        # 其余 alias 优先 OpenCode Go/Zen 套餐（用户订阅）
         return [
             ModelAlias(
                 alias="deepseek",
                 candidates=[
+                    "deepseek/deepseek-v4-pro",          # 官方 API（按量付费，thinking）
                     "opencode-go/deepseek-v4-pro",       # Go 套餐
                     "opencode-go/deepseek-v4-flash",     # Go 套餐
                     "opencode/deepseek-v4-flash-free",   # Zen 免费（极小任务兜底）

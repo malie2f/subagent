@@ -393,6 +393,20 @@ class HubSettings(BaseSettings):
                     "antigravity/claude-sonnet-4-6",
                 ],
             ),
+            ModelAlias(
+                alias="glm",
+                candidates=[
+                    "tokenrhythm/glm-5.2",            # 基元律动 37key 轮询
+                    "tokenrhythm/glm-5.1",
+                ],
+            ),
+            ModelAlias(
+                alias="seed",
+                candidates=[
+                    "tokenrhythm/seed-2.1-pro",       # 基元律动（看图✓）
+                    "tokenrhythm/seed-2.1-turbo",     # 基元律动（看图✓）
+                ],
+            ),
         ]
 
 

@@ -1094,7 +1094,7 @@ async def spawn_subagent(
             inferred_runtime = "claude"
         elif resolved_model.startswith("qoder/"):
             inferred_runtime = "qoder"
-        elif resolved_model.startswith(("opencode-go/", "opencode/", "botcf/", "qwen/", "zen-v4f/", "zen-free/", "deepseek/")):
+        elif resolved_model.startswith(("opencode-go/", "opencode/", "botcf/", "qwen/", "zen-v4f/", "zen-free/", "deepseek/", "tokenrhythm/")):
             inferred_runtime = "opencode"
         elif resolved_model.startswith("antigravity/"):
             inferred_runtime = "antigravity"

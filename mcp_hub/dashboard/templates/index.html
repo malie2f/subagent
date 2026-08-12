@@ -25,6 +25,7 @@
   <button class="tab-btn" data-tab="cluster">集群</button>
   <button class="tab-btn" data-tab="tasks">任务</button>
   <button class="tab-btn" data-tab="usage">用量</button>
+  <button class="tab-btn" data-tab="risk">风控</button>
 </nav>
 
 <main>
@@ -206,6 +207,25 @@
     <div class="card">
       <h2>按天（最近 14 天）</h2>
       <div id="usage-by-day"><div class="muted">加载中...</div></div>
+    </div>
+  </section>
+
+  <!-- 风控 -->
+  <section class="tab hidden" id="tab-risk">
+    <div class="card" style="margin-bottom: 16px">
+      <h2>全局</h2>
+      <div id="risk-global"><div class="muted">加载中...</div></div>
+    </div>
+    <div class="card" style="margin-bottom: 16px">
+      <h2>调用热力图（近 24 小时，按小时聚合）</h2>
+      <div id="risk-heatmap"><div class="muted">加载中...</div></div>
+    </div>
+    <div class="card">
+      <h2>账号风控表</h2>
+      <p class="muted" style="font-size: 12px; margin-bottom: 8px">
+        按 API 账号/套餐分组统计。建议并发：免费池 1、订阅号 2~3、按量 key 放开；在飞超过建议并发的行会标红。
+      </p>
+      <div id="risk-accounts"><div class="muted">加载中...</div></div>
     </div>
   </section>
 </main>

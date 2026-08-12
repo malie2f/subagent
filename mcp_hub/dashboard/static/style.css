@@ -1090,3 +1090,13 @@ footer {
 }
 .danger-btn:hover { background: #f85149; }
 .danger-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* 风控 tab：热力图 + 账号风控表 */
+.heat-table, .risk-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.heat-table th, .heat-table td, .risk-table th, .risk-table td { border: 1px solid #21262d; padding: 2px 4px; }
+.heat-table th, .risk-table th { color: #7d8590; font-weight: 500; font-size: 11px; text-align: left; }
+.heat-table td { text-align: center; }
+.heat-name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left !important; color: #e6edf3; }
+.heat-cell { min-width: 22px; height: 18px; color: #e6edf3; font-size: 11px; }
+.heat-total { color: #7d8590; font-weight: 600; }
+.risk-over td { background: rgba(248, 81, 73, 0.08); }

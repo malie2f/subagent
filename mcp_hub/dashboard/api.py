@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -197,6 +198,149 @@ class DashboardState:
         d = collect_usage()
         d["by_model"] = [{"model": k, **v} for k, v in d["by_model"].items()]
         return {"ok": True, "ts": time.time(), **d}
+
+    # ---------- 风控（调用热力图 + 账号风控表） ----------
+
+    # 账号分层：免费池限 1 并发，订阅号 2~3，按量 key 放开。
+    # (账号名, 档位, 建议并发, model 谓词) —— 顺序即优先级，先中先赢
+    _ACCOUNT_RULES = [
+        ("Zen 免费池", "免费", 1,
+         lambda m: m.startswith(("zen-v4f/", "zen-free/")) or m == "opencode/deepseek-v4-flash-free"),
+        ("DeepSeek 福利池（历史）", "免费", 1,
+         lambda m: m.startswith("deepseek-fuli/")),
+        ("OpenCode Go 套餐", "订阅", 3,
+         lambda m: m.startswith("opencode-go/")),
+        ("OpenAI Codex 订阅", "订阅", 3,
+         lambda m: m.startswith(("gpt-", "openai/"))),
+        ("Google antigravity 号", "订阅", 2,
+         lambda m: m.startswith(("antigravity/", "gemini-"))),
+        ("Kimi Code 订阅", "订阅", 2,
+         lambda m: m.startswith("kimi-code/")),
+        ("BotCF 分组", "中转", 2,
+         lambda m: m.startswith(("botcf/", "botcf-claude/", "botcf-claude-stable/"))),
+        ("qwen 分组", "中转", 2,
+         lambda m: m.startswith("qwen/")),
+        ("tokenrhythm 中转", "中转", 2,
+         lambda m: m.startswith("tokenrhythm/")),
+        ("DeepSeek 官方 key", "按量", 8,
+         lambda m: m.startswith("deepseek/")),
+        ("hedge 网关（自建）", "按量", 8,
+         lambda m: m.startswith("hedge/")),
+        ("Moonshot 官方", "按量", 4,
+         lambda m: m.startswith("moonshot/")),
+        ("MiniMax 官方", "按量", 4,
+         lambda m: m.startswith("minimax/")),
+    ]
+
+    @classmethod
+    def _account_of(cls, model: str) -> tuple[str, str, int]:
+        for name, tier, conc, pred in cls._ACCOUNT_RULES:
+            if pred(model):
+                return name, tier, conc
+        return "其他", "未知", 1
+
+    def risk_board(self) -> dict[str, Any]:
+        """调用热力图（近 24h，model × 小时）+ 账号风控表（按 API 账号/套餐分组）。
+
+        数据全部来自 subagents_registry.json：每次 spawn 一条，
+        含 model/started_at/finished_at/status/stderr_tail。
+        """
+        self._ensure()
+        registry = self._registry_load()
+        entries = list((registry.get("subagents") or {}).values())
+        now = time.time()
+
+        # ---- 热力图：近 24 小时 × model（取调用最多的 10 个）----
+        HOURS = 24
+        bucket0 = int(now // 3600) - (HOURS - 1)  # 最早一个整点桶
+        per_model: dict[str, dict[int, int]] = {}
+        totals: dict[str, int] = {}
+        for e in entries:
+            ts = e.get("started_at") or 0
+            b = int(ts // 3600) - bucket0
+            if not 0 <= b < HOURS:
+                continue
+            model = e.get("model") or "?"
+            cell = per_model.setdefault(model, {})
+            cell[b] = cell.get(b, 0) + 1
+            totals[model] = totals.get(model, 0) + 1
+        top = sorted(totals, key=lambda m: totals[m], reverse=True)[:10]
+        hours = [time.strftime("%H:%M", time.localtime((bucket0 + i) * 3600)) for i in range(HOURS)]
+        heat_rows = []
+        heat_max = 0
+        for m in top:
+            cells = [per_model[m].get(i, 0) for i in range(HOURS)]
+            heat_max = max(heat_max, max(cells))
+            heat_rows.append({"model": m, "cells": cells, "total": totals[m]})
+
+        # ---- 账号风控表 ----
+        throttle_re = re.compile(r"429|throttl|rate.?limit|quota", re.I)
+        accounts: dict[str, dict[str, Any]] = {}
+        for e in entries:
+            model = e.get("model") or "?"
+            name, tier, conc = self._account_of(model)
+            a = accounts.setdefault(name, {
+                "account": name, "tier": tier, "suggested_concurrency": conc,
+                "total": 0, "calls_24h": 0, "calls_7d": 0,
+                "done": 0, "dead": 0, "running": 0, "throttle_hits": 0,
+                "last_call_at": 0.0, "last_dead_at": 0.0,
+                "_dur_sum": 0.0, "_dur_n": 0, "_models": {},
+            })
+            ts = e.get("started_at") or 0
+            a["total"] += 1
+            if now - ts < 86400:
+                a["calls_24h"] += 1
+            if now - ts < 7 * 86400:
+                a["calls_7d"] += 1
+            status = e.get("status") or ""
+            if status == "done":
+                a["done"] += 1
+            elif status == "running":
+                a["running"] += 1
+            else:
+                a["dead"] += 1
+                a["last_dead_at"] = max(a["last_dead_at"], e.get("finished_at") or ts)
+                tail = e.get("stderr_tail") or ""
+                if tail and throttle_re.search(tail):
+                    a["throttle_hits"] += 1
+            a["last_call_at"] = max(a["last_call_at"], ts)
+            fin = e.get("finished_at") or 0
+            if fin > ts:
+                a["_dur_sum"] += fin - ts
+                a["_dur_n"] += 1
+            models = a["_models"]
+            models[model] = models.get(model, 0) + 1
+
+        rows = []
+        for a in accounts.values():
+            models = a.pop("_models")
+            finished = a["done"] + a["dead"]
+            rows.append({
+                "account": a["account"], "tier": a["tier"],
+                "suggested_concurrency": a["suggested_concurrency"],
+                "total": a["total"], "calls_24h": a["calls_24h"], "calls_7d": a["calls_7d"],
+                "done": a["done"], "dead": a["dead"], "running": a["running"],
+                "success_rate": round(a["done"] / finished * 100, 1) if finished else None,
+                "throttle_hits": a["throttle_hits"],
+                "last_call_at": a["last_call_at"] or None,
+                "last_dead_at": a["last_dead_at"] or None,
+                "avg_duration_sec": round(a["_dur_sum"] / a["_dur_n"], 1) if a["_dur_n"] else None,
+                "top_models": sorted(models, key=lambda m: models[m], reverse=True)[:3],
+            })
+        rows.sort(key=lambda r: r["calls_7d"], reverse=True)
+
+        return {
+            "ok": True,
+            "ts": now,
+            "records": len(entries),
+            "heatmap": {"hours": hours, "rows": heat_rows, "max": heat_max},
+            "accounts": rows,
+            "global": {
+                "running": sum(1 for e in entries if e.get("status") == "running"),
+                # 0 = 不限制，对前端返回 None
+                "limit": self._settings.hub_max_concurrent_subagents or None,
+            },
+        }
 
     def models_all(self) -> dict[str, Any]:
         """所有 runtime + model 列表（去重），按 runtime 分组。

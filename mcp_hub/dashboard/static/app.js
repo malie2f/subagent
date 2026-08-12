@@ -200,6 +200,7 @@ function refresh(force) {
     case 'cluster':   renderCluster(); break;
     case 'tasks':     renderTasks(); break;
     case 'usage':     renderUsage(force === true); break;
+    case 'risk':      renderRisk(force === true); break;
   }
   document.getElementById('last-update').textContent = '更新于 ' + fmtTime(Date.now() / 1000);
 }
@@ -1259,6 +1260,88 @@ async function renderUsage(force = false) {
       </div>
     `;
   }).join('') || '<div class="muted">无数据</div>';
+}
+
+// ---------- 风控 tab（调用热力图 + 账号风控表） ----------
+
+let riskLastFetch = 0;
+
+// 风控里的"最近调用/最近死亡"可能跨天：显示 月-日 时:分
+function fmtDayTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts * 1000);
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+async function renderRisk(force = false) {
+  // 15s 节流：registry 近千条，2s 轮询每次都聚合太贵
+  const now = Date.now();
+  if (!force && riskLastFetch && now - riskLastFetch < 15000) return;
+  riskLastFetch = now;
+
+  const d = await fetchJson('/api/risk');
+  if (!d || !d.ok) return;
+
+  // 全局条
+  const g = d.global || {};
+  document.getElementById('risk-global').innerHTML = `
+    <div class="cluster-stat">
+      <div class="stat"><div class="num" style="color: #3fb950">${g.running || 0}</div><div class="label">当前在飞（全局上限 ${g.limit || '不限'}）</div></div>
+    </div>
+    <p class="muted" style="font-size: 11px">每 15s 自动刷新 · 更新于 ${fmtTime(now / 1000)} · 数据源：subagents_registry（${d.records || 0} 条）</p>
+  `;
+
+  // 热力图：行=model（24h 调用 top10），列=小时，颜色深度=次数
+  const hm = d.heatmap || { hours: [], rows: [], max: 0 };
+  const hmax = Math.max(1, hm.max || 1);
+  let html = '';
+  if (hm.rows.length) {
+    html = '<table class="heat-table"><thead><tr><th style="text-align:left">model \\ 时</th>';
+    hm.hours.forEach((h, i) => { html += i % 2 === 0 ? `<th>${h}</th>` : '<th></th>'; });
+    html += '<th>Σ</th></tr></thead><tbody>';
+    hm.rows.forEach(r => {
+      html += `<tr><td class="heat-name" title="${escapeHtml(r.model)}">${escapeHtml(r.model)}</td>`;
+      r.cells.forEach((c, i) => {
+        const bg = c ? `background: rgba(31, 111, 235, ${(0.15 + 0.85 * c / hmax).toFixed(2)})` : '';
+        const tip = `${r.model} · ${hm.hours[i]} · ${c} 次`;
+        html += `<td class="heat-cell" style="${bg}" title="${escapeHtml(tip)}">${c || ''}</td>`;
+      });
+      html += `<td class="heat-total">${r.total}</td></tr>`;
+    });
+    html += '</tbody></table>';
+  } else {
+    html = '<p class="muted">近 24 小时没有调用记录</p>';
+  }
+  document.getElementById('risk-heatmap').innerHTML = html;
+
+  // 账号风控表
+  const rows = d.accounts || [];
+  let t = '<table class="risk-table"><thead><tr>' +
+    '<th>账号</th><th>档位</th><th>建议并发</th><th>在飞</th><th>24h</th><th>7d</th><th>总量</th>' +
+    '<th>成功率</th><th>429/限流</th><th>均时长</th><th>最近调用</th><th>最近死亡</th><th>主力模型</th>' +
+    '</tr></thead><tbody>';
+  rows.forEach(a => {
+    const rate = a.success_rate == null ? '-' : a.success_rate + '%';
+    const rateStyle = a.success_rate != null && a.success_rate < 90 ? ' style="color: #f85149"' : '';
+    const thr = a.throttle_hits > 0 ? `<span style="color: #f85149; font-weight: 600">${a.throttle_hits}</span>` : '0';
+    const run = a.running > 0 ? `<span style="color: #3fb950; font-weight: 600">${a.running}</span>` : '0';
+    const over = a.suggested_concurrency && a.running > a.suggested_concurrency;
+    t += `<tr${over ? ' class="risk-over"' : ''}>` +
+      `<td>${escapeHtml(a.account)}</td>` +
+      `<td>${escapeHtml(a.tier)}</td>` +
+      `<td>${a.suggested_concurrency}</td>` +
+      `<td>${run}</td>` +
+      `<td>${a.calls_24h}</td><td>${a.calls_7d}</td><td>${a.total}</td>` +
+      `<td${rateStyle}>${rate}</td>` +
+      `<td>${thr}</td>` +
+      `<td>${fmtDuration(a.avg_duration_sec)}</td>` +
+      `<td>${fmtDayTime(a.last_call_at)}</td>` +
+      `<td>${a.last_dead_at ? fmtDayTime(a.last_dead_at) : '-'}</td>` +
+      `<td class="muted" style="font-size: 11px">${escapeHtml((a.top_models || []).join(', '))}</td>` +
+      '</tr>';
+  });
+  t += '</tbody></table>';
+  document.getElementById('risk-accounts').innerHTML = t;
 }
 
 // ---------- Dispatch tab ----------

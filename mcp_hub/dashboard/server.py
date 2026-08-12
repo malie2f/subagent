@@ -62,6 +62,11 @@ def create_app() -> "Flask":
         """token / cost 用量聚合（按模型、按天）。"""
         return jsonify(state.usage())
 
+    @app.route("/api/risk")
+    def api_risk():
+        """调用热力图（近 24h × model）+ 账号风控表。"""
+        return jsonify(state.risk_board())
+
     @app.route("/api/subagents")
     def api_subagents():
         include_archived = request.args.get("include_archived", "false").lower() == "true"

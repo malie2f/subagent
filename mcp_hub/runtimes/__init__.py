@@ -13,6 +13,7 @@
   - kimi         ✅  Kimi Code 0.23.x
   - antigravity  ✅  Antigravity CLI 1.1.x（agy / antigravity）
   - grok         ✅  Grok Build 0.2.x（grok-4.5，美国服务需代理）
+  - dsh          ✅  DeepSeek Harness 0.1.x（dsh --profile headless，官方 v4-pro）
   - zcode        🟡  ZCode 0.15.x（需先完成 zcode 登录/模型配置）
   - minimax      🟡  STUB（MiniMax Code 桌面 app 还没修好 CLI 入口）
 """
@@ -23,6 +24,7 @@ from .antigravity import AntigravityAdapter
 from .base import RuntimeAdapter, SubagentHandle, SubagentResult
 from .claude import ClaudeAdapter
 from .codex import CodexAdapter
+from .dsh import DshAdapter
 from .grok import GrokAdapter
 from .kimi import KimiAdapter
 from .mavis import MavisAdapter
@@ -37,6 +39,7 @@ REGISTRY = {
     "opencode": OpencodeAdapter,
     "claude": ClaudeAdapter,
     "codex": CodexAdapter,
+    "dsh": DshAdapter,
     "grok": GrokAdapter,
     "codebuddy": CodebuddyAdapter,
     "kimi": KimiAdapter,
@@ -69,6 +72,7 @@ __all__ = [
     "AntigravityAdapter",
     "ClaudeAdapter",
     "CodexAdapter",
+    "DshAdapter",
     "GrokAdapter",
     "KimiAdapter",
     "MavisAdapter",

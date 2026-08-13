@@ -1098,6 +1098,8 @@ async def spawn_subagent(
             inferred_runtime = "opencode"
         elif resolved_model.startswith("antigravity/"):
             inferred_runtime = "antigravity"
+        elif resolved_model.startswith("dsh/"):
+            inferred_runtime = "dsh"
         elif resolved_model.startswith("moonshot/"):
             inferred_runtime = "kimi"
         elif resolved_model.startswith("anthropic/"):

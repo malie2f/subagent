@@ -407,6 +407,13 @@ class HubSettings(BaseSettings):
                     "tokenrhythm/seed-2.1-turbo",     # 基元律动（看图✓）
                 ],
             ),
+            ModelAlias(
+                alias="dsh",
+                candidates=[
+                    "dsh/deepseek-v4-pro",            # DeepSeek Harness 官方（headless）
+                    "dsh/deepseek-v4-flash",
+                ],
+            ),
         ]
 
 

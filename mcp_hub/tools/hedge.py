@@ -3,10 +3,13 @@
 默认地址 http://202.60.229.202:27941/v1（环境变量 HEDGE_BASE_URL 可覆盖；
 如网关将来要 key，设 HEDGE_API_KEY 会带 Authorization: Bearer）。
 
+CDN 图片下载：qwenlm.ai 在部分网络下被 RST，直连失败时自动走 HTTP 代理回退
+（HEDGE_DOWNLOAD_PROXY 可覆盖，默认取网关同 host 的 zen-gost :27942，设 off 禁用）。
+
 支持的操作：
   - vision          看图理解（chat/completions + image_url part；
                     本地文件读 bytes 转 base64 data URI，http(s) URL 直传网关代下载）
-  - image_generate  生图（/v1/images/generations，b64/url 落盘）
+  - image_generate  生图（/v1/images/generations，b64/url 落盘，url 下载带代理回退）
   - video_generate  生视频（/v1/videos/generations——网关侧代码在未实测，尽力透传）
   - models          列模型（GET /v1/models）
 
@@ -47,6 +50,13 @@ class HedgeAdapter(ToolAdapter):
         ).rstrip("/")
         self._api_key = api_key or os.environ.get("HEDGE_API_KEY", "")
         self._max_image_bytes = _MAX_IMAGE_BYTES
+        # CDN 下载代理回退：本机对 cdn.qwenlm.ai 被 RST 时走 VPS 出口（zen-gost）。
+        # 默认取网关同 host 的 :27942；HEDGE_DOWNLOAD_PROXY 覆盖，设 off/none/direct 禁用。
+        proxy = os.environ.get("HEDGE_DOWNLOAD_PROXY")
+        if proxy is None:
+            gw_host = urlparse(self._base_url).hostname or ""
+            proxy = f"http://{gw_host}:27942" if gw_host else ""
+        self._download_proxy = "" if proxy.lower() in ("off", "none", "direct") else proxy
 
     def is_available(self) -> bool:
         # HTTP 服务没有"装没装"的概念；配了地址就算可用，通不通调用时见分晓
@@ -59,6 +69,7 @@ class HedgeAdapter(ToolAdapter):
         d = super().info()
         d["base_url"] = self._base_url
         d["has_api_key"] = bool(self._api_key)
+        d["download_proxy"] = self._download_proxy or None
         return d
 
     # ---------- 内部：HTTP ----------
@@ -306,16 +317,48 @@ class HedgeAdapter(ToolAdapter):
             return self._err(op, started, f"data 里没有 b64_json/url 可保存: {str(items)[:300]}")
         return saved
 
+    def _download(self, url: str, timeout: int = 120) -> bytes:
+        """先直连；失败且配了下载代理则走代理（HTTPS 用 CONNECT 隧道）。
+
+        代理是 gost 轮询上游池，偶有死节点回 503，故代理分支最多试 3 次。
+        """
+        try:
+            return self._fetch(url, None, timeout)
+        except Exception as direct_err:  # noqa: BLE001
+            if not self._download_proxy:
+                raise
+            proxy_err: Exception | None = None
+            for _ in range(3):
+                try:
+                    return self._fetch(url, self._download_proxy, timeout)
+                except Exception as e:  # noqa: BLE001
+                    proxy_err = e
+            raise OSError(
+                f"直连失败({direct_err})；代理 {self._download_proxy} 重试 3 次仍失败({proxy_err})"
+            ) from proxy_err
+
     @staticmethod
-    def _download(url: str, timeout: int = 120) -> bytes:
+    def _fetch(url: str, proxy: str | None, timeout: int) -> bytes:
         p = urlparse(url)
         host = p.hostname or "127.0.0.1"
         port = p.port or (443 if p.scheme == "https" else 80)
         path = p.path or "/"
         if p.query:
             path += "?" + p.query
-        conn_cls = http.client.HTTPSConnection if p.scheme == "https" else http.client.HTTPConnection
-        conn = conn_cls(host, port, timeout=timeout)
+        conn: http.client.HTTPConnection
+        if proxy:
+            prox = urlparse(proxy if "://" in proxy else f"http://{proxy}")
+            phost = prox.hostname or "127.0.0.1"
+            pport = prox.port or 8080
+            if p.scheme == "https":
+                conn = http.client.HTTPSConnection(phost, pport, timeout=timeout)
+                conn.set_tunnel(host, port)
+            else:
+                conn = http.client.HTTPConnection(phost, pport, timeout=timeout)
+                path = url  # 经代理取明文 HTTP 用绝对 URI
+        else:
+            conn_cls = http.client.HTTPSConnection if p.scheme == "https" else http.client.HTTPConnection
+            conn = conn_cls(host, port, timeout=timeout)
         try:
             conn.request("GET", path)
             r = conn.getresponse()

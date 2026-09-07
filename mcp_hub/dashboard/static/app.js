@@ -171,6 +171,19 @@ document.getElementById('auto-refresh').addEventListener('change', e => {
 
 document.getElementById('refresh-btn').addEventListener('click', () => refresh(true));
 
+// ---------- 主题切换：月之暗面（默认）/ 月之亮面 ----------
+const themeToggleBtn = document.getElementById('theme-toggle');
+function applyTheme(t) {
+  document.documentElement.classList.toggle('moon-light', t === 'moon-light');
+  themeToggleBtn.textContent = t === 'moon-light' ? '☀ 月之亮面' : '☾ 月之暗面';
+  themeToggleBtn.title = '当前：' + (t === 'moon-light' ? '月之亮面（日间）' : '月之暗面（夜间）') + '，点击切换';
+  localStorage.setItem('mcp-hub-theme', t);
+}
+themeToggleBtn.addEventListener('click', () => {
+  applyTheme(document.documentElement.classList.contains('moon-light') ? 'moon-dark' : 'moon-light');
+});
+applyTheme(localStorage.getItem('mcp-hub-theme') || 'moon-dark');
+
 // 封存会话开关
 document.getElementById('subagent-show-archived').addEventListener('change', e => {
   showArchivedSubagents = e.target.checked;
@@ -318,7 +331,7 @@ function startLiveStream(tid, isRunning = true) {
 
   if (!isRunning) {
     statusEl.textContent = '■ 任务已结束（静态日志）';
-    statusEl.style.color = '#7d8590';
+    statusEl.style.color = 'var(--text-dim)';
     statusEl.classList.remove('reconnect');
     statusEl.title = '';
     return;
@@ -328,7 +341,7 @@ function startLiveStream(tid, isRunning = true) {
   statusEl.dataset.tid = tid;
   statusEl.classList.remove('reconnect');
   statusEl.textContent = '○ 连接中...';
-  statusEl.style.color = '#d29922';
+  statusEl.style.color = 'var(--warn)';
 
   const es = new EventSource(`/api/subagents/${encodeURIComponent(tid)}/stream`);
   liveEventSource = es;
@@ -339,7 +352,7 @@ function startLiveStream(tid, isRunning = true) {
     const el = liveEl('live-status');
     if (el && liveStreamTaskId === tid) {
       el.textContent = '● 已连接';
-      el.style.color = '#2ea043';
+      el.style.color = 'var(--ok)';
       el.classList.remove('reconnect');
       el.title = 'SSE 实时日志流已连接';
     }
@@ -350,7 +363,7 @@ function startLiveStream(tid, isRunning = true) {
     if (el && liveStreamTaskId === tid) {
       el.dataset.tid = tid;
       el.textContent = '× 已断开（点击重连）';
-      el.style.color = '#f85149';
+      el.style.color = 'var(--err)';
       el.classList.add('reconnect');
       el.title = '连接断开，EventSource 自动重连中；点击可立即重连';
     }
@@ -377,7 +390,7 @@ function startLiveStream(tid, isRunning = true) {
       if (el) {
         el.dataset.tid = tid;
         el.textContent = '错误: ' + (data.message || '') + '（点击重连）';
-        el.style.color = '#f85149';
+        el.style.color = 'var(--err)';
         el.classList.add('reconnect');
       }
       es.close();
@@ -411,7 +424,7 @@ async function savePinnedModels() {
   const models = text.split('\n').map(s => s.trim()).filter(s => s);
   const statusEl = document.getElementById('pinned-status');
   statusEl.textContent = '保存中...';
-  statusEl.style.color = '#7d8590';
+  statusEl.style.color = 'var(--text-dim)';
   try {
     const r = await fetch('/api/dashboard/pinned-models', {
       method: 'POST',
@@ -421,17 +434,17 @@ async function savePinnedModels() {
     const data = await r.json();
     if (data.ok) {
       statusEl.textContent = `已保存 (${data.pinned_models.length} 个)`;
-      statusEl.style.color = '#2ea043';
+      statusEl.style.color = 'var(--ok)';
       // 重新拉 models 让卡片墙刷新
       modelsCache = null;
       await renderDispatch();
     } else {
       statusEl.textContent = `失败: ${data.error}`;
-      statusEl.style.color = '#f85149';
+      statusEl.style.color = 'var(--err)';
     }
   } catch (e) {
     statusEl.textContent = `异常: ${e.message}`;
-    statusEl.style.color = '#f85149';
+    statusEl.style.color = 'var(--err)';
   }
 }
 
@@ -519,7 +532,7 @@ async function renderRuntimes() {
         <span class="muted" style="font-weight: 400">二进制=${escapeHtml(rt.binary)}</span>
       </h2>
       ${rt.status ? `<div class="muted" style="margin-bottom: 8px">状态: ${escapeHtml(rt.status)} · ${escapeHtml(rt.note || '')}</div>` : ''}
-      <div class="muted" style="font-size: 12px">${rt.models.length ? rt.models.map(m => `<span style="background: #21262d; padding: 1px 6px; border-radius: 3px; margin-right: 4px; display: inline-block; margin-bottom: 4px">${escapeHtml(m)}</span>`).join('') : '（占位，无可用模型）'}</div>
+      <div class="muted" style="font-size: 12px">${rt.models.length ? rt.models.map(m => `<span style="background: var(--border-dim); padding: 1px 6px; margin-right: 4px; display: inline-block; margin-bottom: 4px">${escapeHtml(m)}</span>`).join('') : '（占位，无可用模型）'}</div>
     </div>
   `).join('') || '<div class="muted">无运行时</div>';
 }
@@ -673,12 +686,12 @@ async function openSubagentTranscript(tid, containerId) {
       <div class="transcript-header">
         <span class="muted">${r.event_count} 个事件</span>
         <span class="muted">${fmtBytes(r.size)} · ${escapeHtml(r.path)}</span>
-        ${r.live ? '<span style="color:#3fb950;font-size:11px">● 实时预览</span>' : ''}
+        ${r.live ? '<span style="color:var(--ok-bright);font-size:11px">● 实时预览</span>' : ''}
       </div>
       <div class="transcript-body">${renderTranscriptView(r.events, isRunning)}</div>
     `;
   } catch (e) {
-    el.innerHTML = `<div class="muted" style="color: #f85149">异常: ${escapeHtml(e.message)}</div>`;
+    el.innerHTML = `<div class="muted" style="color: var(--err)">异常: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -771,7 +784,7 @@ async function renderSubagents() {
       stopLiveStream();
       if (statusEl) {
         statusEl.textContent = '■ 任务已结束';
-        statusEl.style.color = '#7d8590';
+        statusEl.style.color = 'var(--text-dim)';
         statusEl.classList.remove('reconnect');
       }
     }
@@ -863,7 +876,7 @@ async function showSubagentDetail(tid) {
       <tr><td>耗时</td><td>${fmtDuration(s.duration_sec)}</td></tr>
       <tr><td>日志</td><td>${log ? `${fmtBytes(log.size)} (${escapeHtml(log.path)})` : '无'}</td></tr>
       <tr><td>会话</td><td>${transcriptSummary}</td></tr>
-      ${s.error ? `<tr><td>错误</td><td style="color: #f85149">${escapeHtml(s.error)}</td></tr>` : ''}
+      ${s.error ? `<tr><td>错误</td><td style="color: var(--err)">${escapeHtml(s.error)}</td></tr>` : ''}
     </table>
     ${s.result_preview ? `<h3 style="font-size: 13px; margin: 8px 0 4px">结果（预览）</h3><pre class="log">${escapeHtml(s.result_preview)}</pre>` : ''}
 
@@ -886,7 +899,7 @@ async function showSubagentDetail(tid) {
         </div>
       ` : ''}
       <div id="live-log-container">
-        <pre class="log" style="max-height: 300px; background: #0a0d12; margin: 0">${log && log.content ? escapeHtml(log.content) : ''}</pre>
+        <pre class="log" style="max-height: 300px; background: var(--inset); margin: 0">${log && log.content ? escapeHtml(log.content) : ''}</pre>
         <button id="live-jump-latest" class="live-jump-latest hidden">⤓ 已暂停跟随，点击回到底部</button>
       </div>
     </div>
@@ -894,14 +907,14 @@ async function showSubagentDetail(tid) {
     <div class="transcript-section">
       <h3 style="font-size: 13px; margin: 16px 0 4px; display: flex; align-items: center; gap: 8px">
         💬 会话内容（transcript）
-        <button onclick="openSubagentTranscript('${escapeHtml(tid)}', 'transcript-container')" style="background: #1f6feb; color: #fff; border: none; padding: 2px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;">${transcript.ok ? '↻ 重新加载' : '加载'}</button>
+        <button onclick="openSubagentTranscript('${escapeHtml(tid)}', 'transcript-container')" style="background: var(--accent-btn); color: #fff; border: none; padding: 2px 10px; cursor: pointer; font-size: 11px;">${transcript.ok ? '↻ 重新加载' : '加载'}</button>
       </h3>
       <div id="transcript-container">
         ${transcript.ok ? `
           <div class="transcript-header">
             <span class="muted">${transcript.event_count} 个事件</span>
             <span class="muted">${fmtBytes(transcript.size)} · ${escapeHtml(transcript.path)}</span>
-            ${transcript.live ? '<span style="color:#3fb950;font-size:11px">● 实时预览（任务进行中）</span>' : ''}
+            ${transcript.live ? '<span style="color:var(--ok-bright);font-size:11px">● 实时预览（任务进行中）</span>' : ''}
           </div>
           <div class="transcript-body">${renderTranscriptView(transcript.events, isRunning, s.duration_sec)}</div>
         ` : `<div class="muted">${escapeHtml(transcript.error || '无 transcript（这个 run 早于 v3 引入 transcript）')}</div>`}
@@ -914,14 +927,14 @@ async function showSubagentDetail(tid) {
         给这个子 agent 发消息（保存到任务旁，续跑时带上）。任务卡住或中断后可用"继续"基于原任务重新 spawn。
       </p>
       <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
-        <input type="text" id="user-msg-input" placeholder="例如：继续 / 上一步错了，重新解析 ..." style="flex: 1; background: #0a0d12; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 4px; font-size: 13px;">
-        <button id="user-msg-save" style="background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">仅保存</button>
-        <button id="user-msg-continue" style="background: #1f6feb; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">继续任务</button>
+        <input type="text" id="user-msg-input" placeholder="例如：继续 / 上一步错了，重新解析 ..." style="flex: 1; background: var(--inset); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; font-size: 13px;">
+        <button id="user-msg-save" style="background: var(--border-dim); color: var(--text); border: 1px solid var(--border); padding: 6px 12px; cursor: pointer; font-size: 12px;">仅保存</button>
+        <button id="user-msg-continue" style="background: var(--accent-btn); color: #fff; border: none; padding: 6px 12px; cursor: pointer; font-size: 12px;">继续任务</button>
       </div>
       <div id="user-msg-status" class="muted" style="font-size: 12px; margin-bottom: 4px"></div>
       <div id="user-msg-list" style="font-size: 12px"></div>
       ${isRunning ? `
-        <div style="display: flex; gap: 8px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #30363d">
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border)">
           <button id="cancel-task-btn" class="danger-btn">⛔ 停止任务</button>
           <span id="cancel-status" class="muted" style="font-size: 12px">强制杀掉子进程（不可恢复）</span>
         </div>
@@ -933,7 +946,7 @@ async function showSubagentDetail(tid) {
       <pre class="log">${escapeHtml(log.content)}</pre>
     ` : ''}
 
-    <h3 style="font-size: 13px; margin: 16px 0 4px; border-top: 1px solid #30363d; padding-top: 12px">会话历史</h3>
+    <h3 style="font-size: 13px; margin: 16px 0 4px; border-top: 1px solid var(--border); padding-top: 12px">会话历史</h3>
     <p class="muted" style="font-size: 12px; margin-bottom: 8px">同一 worker / 同一 model / 同一发起方 派过的其他任务（点开看详情）</p>
     ${renderHistSection('同 worker（' + escapeHtml(s.claimed_by || '-') + '）跑过', (hist.history || {}).by_worker)}
     ${renderHistSection('同 model（' + escapeHtml(s.for_model || '-') + '）接的任务', (hist.history || {}).by_for_model)}
@@ -998,7 +1011,7 @@ async function showSubagentDetail(tid) {
         </div>
       `).join('');
     } catch (e) {
-      msgList.innerHTML = `<div class="muted" style="color:#f85149">加载失败: ${escapeHtml(e.message)}</div>`;
+      msgList.innerHTML = `<div class="muted" style="color:var(--err)">加载失败: ${escapeHtml(e.message)}</div>`;
     }
   }
 
@@ -1006,13 +1019,13 @@ async function showSubagentDetail(tid) {
     const msg = msgInput.value.trim();
     if (!msg) {
       msgStatus.textContent = '消息不能为空';
-      msgStatus.style.color = '#f85149';
+      msgStatus.style.color = 'var(--err)';
       return;
     }
     if (msgSaveBtn.disabled) return;  // 发送中，防重复点
     msgSaveBtn.disabled = true;
     msgStatus.textContent = '发送中...';
-    msgStatus.style.color = '#7d8590';
+    msgStatus.style.color = 'var(--text-dim)';
     try {
       const r = await fetch(`/api/subagents/${tid}/message`, {
         method: 'POST',
@@ -1022,16 +1035,16 @@ async function showSubagentDetail(tid) {
       const data = await r.json();
       if (data.ok) {
         msgStatus.textContent = '✓ 已发送并保存（续跑时会带上）';
-        msgStatus.style.color = '#2ea043';
+        msgStatus.style.color = 'var(--ok)';
         msgInput.value = '';
         await loadUserMessages();
       } else {
         msgStatus.textContent = '发送失败: ' + (data.error || '未知');
-        msgStatus.style.color = '#f85149';
+        msgStatus.style.color = 'var(--err)';
       }
     } catch (e) {
       msgStatus.textContent = '异常: ' + e.message;
-      msgStatus.style.color = '#f85149';
+      msgStatus.style.color = 'var(--err)';
     } finally {
       msgSaveBtn.disabled = false;
     }
@@ -1044,7 +1057,7 @@ async function showSubagentDetail(tid) {
     }
     msgContinueBtn.disabled = true;
     msgStatus.textContent = '续跑派发中（spawn 新子 agent）...';
-    msgStatus.style.color = '#7d8590';
+    msgStatus.style.color = 'var(--text-dim)';
     try {
       const r = await fetch(`/api/subagents/${tid}/continue`, {
         method: 'POST',
@@ -1055,7 +1068,7 @@ async function showSubagentDetail(tid) {
       if (data.ok) {
         const note = data.note ? `（${data.note}）` : '';
         msgStatus.textContent = `✓ 已派发续跑任务 ${data.new_task_id}，等待 agent 启动… ${note}（即将自动跳转）`;
-        msgStatus.style.color = '#2ea043';
+        msgStatus.style.color = 'var(--ok)';
         msgInput.value = '';
         // 跳转到新任务
         currentSubagent = data.new_task_id;
@@ -1071,11 +1084,11 @@ async function showSubagentDetail(tid) {
         }, 500);
       } else {
         msgStatus.textContent = '续跑失败: ' + (data.error || '未知');
-        msgStatus.style.color = '#f85149';
+        msgStatus.style.color = 'var(--err)';
       }
     } catch (e) {
       msgStatus.textContent = '异常: ' + e.message;
-      msgStatus.style.color = '#f85149';
+      msgStatus.style.color = 'var(--err)';
     } finally {
       msgContinueBtn.disabled = false;
     }
@@ -1091,30 +1104,30 @@ async function showSubagentDetail(tid) {
       const cStatus = document.getElementById('cancel-status');
       cancelBtn.disabled = true;
       cStatus.textContent = '停止中...';
-      cStatus.style.color = '#7d8590';
+      cStatus.style.color = 'var(--text-dim)';
       try {
         const r = await fetch(`/api/subagents/${tid}/cancel`, { method: 'POST' });
         const data = await r.json();
         if (data.ok) {
           cStatus.textContent = '✓ 已停止（子进程已杀）';
-          cStatus.style.color = '#2ea043';
+          cStatus.style.color = 'var(--ok)';
           const lStatus = liveEl('live-status');  // 先拿元素再 stop（stop 会清 liveRoot）
           stopLiveStream();
           if (lStatus) {
             lStatus.textContent = '■ 已停止';
-            lStatus.style.color = '#7d8590';
+            lStatus.style.color = 'var(--text-dim)';
             lStatus.classList.remove('reconnect');
           }
           // 列表 2s 轮询也会更新，这里主动刷一次让状态立即反映
           await renderSubagents();
         } else {
           cStatus.textContent = '停止失败: ' + (data.error || '未知');
-          cStatus.style.color = '#f85149';
+          cStatus.style.color = 'var(--err)';
           cancelBtn.disabled = false;
         }
       } catch (e) {
         cStatus.textContent = '异常: ' + e.message;
-        cStatus.style.color = '#f85149';
+        cStatus.style.color = 'var(--err)';
         cancelBtn.disabled = false;
       }
     });
@@ -1152,7 +1165,7 @@ async function renderCluster() {
     <div class="card" style="margin-bottom: 12px">
       <h2>
         <span class="pool-name">${escapeHtml(p.name)}</span>
-        <span class="pool-tag" style="font-size: 12px; color: #8b949e; margin-left: 8px">
+        <span class="pool-tag" style="font-size: 12px; color: var(--gray2); margin-left: 8px">
           ${p.enabled ? '✓ 启用' : '× 禁用'} · size=${p.size} · runtime=${escapeHtml(p.runtime)} · model=${escapeHtml(p.model)}
         </span>
       </h2>
@@ -1163,10 +1176,10 @@ async function renderCluster() {
         <tr><td>任务超时</td><td>${p.task_timeout_sec}秒</td></tr>
       </table>
       <div class="cluster-stat" style="margin-top: 8px">
-        <div class="stat"><div class="num" style="color: #d29922">${p.queue.pending}</div><div class="label">待处理</div></div>
-        <div class="stat"><div class="num" style="color: #1f6feb">${p.queue.claimed}</div><div class="label">认领中</div></div>
-        <div class="stat"><div class="num" style="color: #2ea043">${p.queue.done}</div><div class="label">已完成</div></div>
-        <div class="stat"><div class="num" style="color: #f85149">${p.queue.failed}</div><div class="label">失败</div></div>
+        <div class="stat"><div class="num" style="color: var(--warn)">${p.queue.pending}</div><div class="label">待处理</div></div>
+        <div class="stat"><div class="num" style="color: var(--accent-btn)">${p.queue.claimed}</div><div class="label">认领中</div></div>
+        <div class="stat"><div class="num" style="color: var(--ok)">${p.queue.done}</div><div class="label">已完成</div></div>
+        <div class="stat"><div class="num" style="color: var(--err)">${p.queue.failed}</div><div class="label">失败</div></div>
       </div>
     </div>
   `).join('');
@@ -1175,10 +1188,10 @@ async function renderCluster() {
     <div class="card">
       <h2>总览（${pools.length} 个 pool，共 ${totalSize} 个 worker）</h2>
       <div class="cluster-stat">
-        <div class="stat"><div class="num" style="color: #d29922">${totalPending}</div><div class="label">待处理</div></div>
-        <div class="stat"><div class="num" style="color: #1f6feb">${totalClaimed}</div><div class="label">认领中</div></div>
-        <div class="stat"><div class="num" style="color: #2ea043">${totalDone}</div><div class="label">已完成</div></div>
-        <div class="stat"><div class="num" style="color: #f85149">${totalFailed}</div><div class="label">失败</div></div>
+        <div class="stat"><div class="num" style="color: var(--warn)">${totalPending}</div><div class="label">待处理</div></div>
+        <div class="stat"><div class="num" style="color: var(--accent-btn)">${totalClaimed}</div><div class="label">认领中</div></div>
+        <div class="stat"><div class="num" style="color: var(--ok)">${totalDone}</div><div class="label">已完成</div></div>
+        <div class="stat"><div class="num" style="color: var(--err)">${totalFailed}</div><div class="label">失败</div></div>
       </div>
     </div>
     ${poolsHtml}
@@ -1211,9 +1224,9 @@ async function renderUsage(force = false) {
   document.getElementById('usage-stats').innerHTML = `
     <div class="cluster-stat" style="margin-bottom: 8px">
       <div class="stat"><div class="num">${fmtTokens((today.tokens || {}).total)}</div><div class="label">今日 token（${today.tasks || 0} 任务）</div></div>
-      <div class="stat"><div class="num" style="color: #d29922">${fmtCost(today.cost)}</div><div class="label">今日 cost</div></div>
+      <div class="stat"><div class="num" style="color: var(--warn)">${fmtCost(today.cost)}</div><div class="label">今日 cost</div></div>
       <div class="stat"><div class="num">${fmtTokens((total.tokens || {}).total)}</div><div class="label">累计 token（${total.tasks || 0} 任务）</div></div>
-      <div class="stat"><div class="num" style="color: #d29922">${fmtCost(total.cost)}</div><div class="label">累计 cost</div></div>
+      <div class="stat"><div class="num" style="color: var(--warn)">${fmtCost(total.cost)}</div><div class="label">累计 cost</div></div>
     </div>
     <p class="muted" style="font-size: 11px">
       每 30s 自动刷新 · 更新于 ${fmtTime(now / 1000)} ·
@@ -1286,7 +1299,7 @@ async function renderRisk(force = false) {
   const g = d.global || {};
   document.getElementById('risk-global').innerHTML = `
     <div class="cluster-stat">
-      <div class="stat"><div class="num" style="color: #3fb950">${g.running || 0}</div><div class="label">当前在飞（全局上限 ${g.limit || '不限'}）</div></div>
+      <div class="stat"><div class="num" style="color: var(--ok-bright)">${g.running || 0}</div><div class="label">当前在飞（全局上限 ${g.limit || '不限'}）</div></div>
     </div>
     <p class="muted" style="font-size: 11px">每 15s 自动刷新 · 更新于 ${fmtTime(now / 1000)} · 数据源：subagents_registry（${d.records || 0} 条）</p>
   `;
@@ -1303,8 +1316,9 @@ async function renderRisk(force = false) {
       html += `<tr><td class="heat-name" title="${escapeHtml(r.model)}">${escapeHtml(r.model)}</td>`;
       r.cells.forEach((c, i) => {
         const bg = c ? `background: rgba(31, 111, 235, ${(0.15 + 0.85 * c / hmax).toFixed(2)})` : '';
+        const fg = c && c / hmax > 0.55 ? '; color: #fff' : '';
         const tip = `${r.model} · ${hm.hours[i]} · ${c} 次`;
-        html += `<td class="heat-cell" style="${bg}" title="${escapeHtml(tip)}">${c || ''}</td>`;
+        html += `<td class="heat-cell" style="${bg}${fg}" title="${escapeHtml(tip)}">${c || ''}</td>`;
       });
       html += `<td class="heat-total">${r.total}</td></tr>`;
     });
@@ -1322,9 +1336,9 @@ async function renderRisk(force = false) {
     '</tr></thead><tbody>';
   rows.forEach(a => {
     const rate = a.success_rate == null ? '-' : a.success_rate + '%';
-    const rateStyle = a.success_rate != null && a.success_rate < 90 ? ' style="color: #f85149"' : '';
-    const thr = a.throttle_hits > 0 ? `<span style="color: #f85149; font-weight: 600">${a.throttle_hits}</span>` : '0';
-    const run = a.running > 0 ? `<span style="color: #3fb950; font-weight: 600">${a.running}</span>` : '0';
+    const rateStyle = a.success_rate != null && a.success_rate < 90 ? ' style="color: var(--err)"' : '';
+    const thr = a.throttle_hits > 0 ? `<span style="color: var(--err); font-weight: 600">${a.throttle_hits}</span>` : '0';
+    const run = a.running > 0 ? `<span style="color: var(--ok-bright); font-weight: 600">${a.running}</span>` : '0';
     const over = a.suggested_concurrency && a.running > a.suggested_concurrency;
     t += `<tr${over ? ' class="risk-over"' : ''}>` +
       `<td>${escapeHtml(a.account)}</td>` +
@@ -1363,11 +1377,11 @@ async function submitQuickDispatch() {
   const statusEl = document.getElementById('quick-status');
   if (!payload.trim()) {
     statusEl.textContent = '任务内容不能为空';
-    statusEl.style.color = '#f85149';
+    statusEl.style.color = 'var(--err)';
     return;
   }
   statusEl.textContent = '派发中...';
-  statusEl.style.color = '#7d8590';
+  statusEl.style.color = 'var(--text-dim)';
   const btn = document.getElementById('quick-submit');
   btn.disabled = true;
   try {
@@ -1399,16 +1413,16 @@ async function submitQuickDispatch() {
       addDispatchedTask(data, payload);
       const tag = data.has_acceptance ? '（带验收）' : '';
       statusEl.textContent = `已派发 ${data.task_id} ${tag}`;
-      statusEl.style.color = '#2ea043';
+      statusEl.style.color = 'var(--ok)';
       document.getElementById('quick-payload').value = '';
       renderDispatch();
     } else {
       statusEl.textContent = `失败: ${data.error}`;
-      statusEl.style.color = '#f85149';
+      statusEl.style.color = 'var(--err)';
     }
   } catch (e) {
     statusEl.textContent = `异常: ${e.message}`;
-    statusEl.style.color = '#f85149';
+    statusEl.style.color = 'var(--err)';
   } finally {
     btn.disabled = false;
   }
@@ -1538,13 +1552,13 @@ async function submitFromCard(card) {
 
   if (!payload.trim()) {
     statusEl.textContent = '请先填任务内容';
-    statusEl.style.color = '#f85149';
+    statusEl.style.color = 'var(--err)';
     return;
   }
   const btn = card.querySelector('.card-submit');
   btn.disabled = true;
   statusEl.textContent = '派发中...';
-  statusEl.style.color = '#7d8590';
+  statusEl.style.color = 'var(--text-dim)';
 
   try {
     const r = await fetch('/api/cluster/submit', {
@@ -1556,17 +1570,17 @@ async function submitFromCard(card) {
     if (data.ok) {
       addDispatchedTask(data, payload);
       statusEl.textContent = `已派发 ${data.task_id}`;
-      statusEl.style.color = '#2ea043';
+      statusEl.style.color = 'var(--ok)';
       card.querySelector('.card-payload').value = '';
       // 跳到 dispatch 列表
       renderDispatch();
     } else {
       statusEl.textContent = `失败: ${data.error}`;
-      statusEl.style.color = '#f85149';
+      statusEl.style.color = 'var(--err)';
     }
   } catch (e) {
     statusEl.textContent = `异常: ${e.message}`;
-    statusEl.style.color = '#f85149';
+    statusEl.style.color = 'var(--err)';
   } finally {
     btn.disabled = false;
   }
@@ -1710,7 +1724,7 @@ async function renderTasks() {
       stopLiveStream();
       if (statusEl) {
         statusEl.textContent = '■ 任务已结束';
-        statusEl.style.color = '#7d8590';
+        statusEl.style.color = 'var(--text-dim)';
         statusEl.classList.remove('reconnect');
       }
     }
@@ -1741,7 +1755,7 @@ async function renderTasks() {
           <span class="muted">${fmtTime(t.created_at)}</span>
         </div>
         <div class="payload">${escapeHtml((t.payload || '').slice(0, 500))}</div>
-        ${t.error ? `<div class="muted" style="color: #f85149; margin-top: 4px">错误: ${escapeHtml(t.error)}</div>` : ''}
+        ${t.error ? `<div class="muted" style="color: var(--err); margin-top: 4px">错误: ${escapeHtml(t.error)}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -1764,7 +1778,7 @@ async function toggleTaskDetail(tid) {
   try {
     const d = await fetchJson(`/api/tasks/${encodeURIComponent(tid)}/details`);
     if (!d.ok) {
-      detailEl.innerHTML = `<div class="muted" style="color: #f85149; padding: 12px">${escapeHtml(d.error || '加载失败')}</div>`;
+      detailEl.innerHTML = `<div class="muted" style="color: var(--err); padding: 12px">${escapeHtml(d.error || '加载失败')}</div>`;
       return;
     }
     const t = d.task;
@@ -1793,7 +1807,7 @@ async function toggleTaskDetail(tid) {
     const verifyingBanner = t.status === 'verifying' ? `
       <div class="verify-banner">
         <div>
-          <div style="font-size: 14px; font-weight: 600; color: #d29922">⚠️ 此任务在 verifying 状态 — 等验收</div>
+          <div style="font-size: 14px; font-weight: 600; color: var(--warn)">⚠️ 此任务在 verifying 状态 — 等验收</div>
           <div class="muted" style="font-size: 12px; margin-top: 2px">先用下方"会话内容"看 agent 实际干了什么，再决定通过 / 不通过。</div>
         </div>
       </div>
@@ -1803,7 +1817,7 @@ async function toggleTaskDetail(tid) {
       <div class="card" style="margin-top: 12px">
         <div class="row1" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
           <h2 style="font-size: 14px; margin: 0">任务详情 · ${escapeHtml(t.task_id)}</h2>
-          <button onclick="stopLiveStream(); currentTaskDetail=null; document.getElementById('task-detail').innerHTML=''; document.querySelectorAll('.task-item').forEach(e=>e.classList.remove('active'))" style="background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">收起</button>
+          <button onclick="stopLiveStream(); currentTaskDetail=null; document.getElementById('task-detail').innerHTML=''; document.querySelectorAll('.task-item').forEach(e=>e.classList.remove('active'))" style="background: var(--border-dim); color: var(--text); border: 1px solid var(--border); padding: 2px 8px; cursor: pointer; font-size: 11px;">收起</button>
         </div>
         ${verifyingBanner}
         <table class="detail-table">
@@ -1815,7 +1829,7 @@ async function toggleTaskDetail(tid) {
           <tr><td>创建时间</td><td>${fmtTime(t.created_at)}</td></tr>
           <tr><td>认领时间</td><td>${fmtTime(t.claimed_at)}</td></tr>
           <tr><td>完成时间</td><td>${fmtTime(t.completed_at)}</td></tr>
-          ${t.error ? `<tr><td>错误</td><td style="color: #f85149">${escapeHtml(t.error)}</td></tr>` : ''}
+          ${t.error ? `<tr><td>错误</td><td style="color: var(--err)">${escapeHtml(t.error)}</td></tr>` : ''}
           <tr><td>重试</td><td>${t.retries} / ${t.max_retries}</td></tr>
         </table>
         ${(t.acceptance && t.acceptance.criteria && t.acceptance.criteria.length) ? renderAcceptance(t) : ''}
@@ -1834,7 +1848,7 @@ async function toggleTaskDetail(tid) {
             <span class="muted">上翻暂停跟随，滚回底部恢复</span>
           </div>
           <div id="live-log-container">
-            <pre class="log" style="max-height: 300px; background: #0a0d12; margin: 0">${log && log.content ? escapeHtml(log.content) : ''}</pre>
+            <pre class="log" style="max-height: 300px; background: var(--inset); margin: 0">${log && log.content ? escapeHtml(log.content) : ''}</pre>
             <button id="live-jump-latest" class="live-jump-latest hidden">⤓ 已暂停跟随，点击回到底部</button>
           </div>
         </div>
@@ -1842,7 +1856,7 @@ async function toggleTaskDetail(tid) {
         <div class="transcript-section" style="margin-top: 12px">
           <h3 style="font-size: 13px; margin: 12px 0 4px; display: flex; align-items: center; gap: 8px">
             💬 会话内容（transcript）${transcript ? `· <span class="muted">${transcript.event_count} 个事件</span>` : ''}
-            ${transcript ? `<button onclick="openSubagentTranscript('${escapeHtml(tid)}', 'task-transcript-container')" style="background: #1f6feb; color: #fff; border: none; padding: 2px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;">↻ 重新加载</button>` : ''}
+            ${transcript ? `<button onclick="openSubagentTranscript('${escapeHtml(tid)}', 'task-transcript-container')" style="background: var(--accent-btn); color: #fff; border: none; padding: 2px 10px; cursor: pointer; font-size: 11px;">↻ 重新加载</button>` : ''}
           </h3>
           <div id="task-transcript-container">
             ${transcript ? `
@@ -1858,7 +1872,7 @@ async function toggleTaskDetail(tid) {
         <pre class="log">${escapeHtml(t.payload || '')}</pre>
         ${t.result ? `<h3 style="font-size: 13px; margin: 8px 0 4px">结果</h3><pre class="log">${escapeHtml(t.result)}</pre>` : ''}
         ${log ? `<h3 style="font-size: 13px; margin: 8px 0 4px">📋 子 Agent stdout/stderr 日志（末尾 32KB）<span class="muted" style="font-weight: 400">${fmtBytes(log.size)} · ${escapeHtml(log.path)}</span></h3><pre class="log">${escapeHtml(log.content)}</pre>` : ''}
-        <h3 style="font-size: 13px; margin: 12px 0 4px; padding-top: 8px; border-top: 1px solid #30363d">相关历史</h3>
+        <h3 style="font-size: 13px; margin: 12px 0 4px; padding-top: 8px; border-top: 1px solid var(--border)">相关历史</h3>
         <p class="muted" style="font-size: 12px; margin-bottom: 8px">同 model / 同发起方 / 同 worker / 同主题（点开跳到那个任务）</p>
         ${renderHistSection('同 model（' + escapeHtml(t.for_model || '-') + '）的任务', hist.by_for_model)}
         ${renderHistSection('同发起方（' + escapeHtml(t.from_model || '-') + '）派过', hist.by_from_model)}
@@ -1872,7 +1886,7 @@ async function toggleTaskDetail(tid) {
     bindLiveLogControls(document.getElementById('task-detail'));
     startLiveStream(tid, ['running', 'claimed', 'pending'].includes(t.status));
   } catch (e) {
-    detailEl.innerHTML = `<div class="muted" style="color: #f85149; padding: 12px">异常: ${escapeHtml(e.message)}</div>`;
+    detailEl.innerHTML = `<div class="muted" style="color: var(--err); padding: 12px">异常: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -1881,7 +1895,7 @@ function renderAcceptance(t) {
   const crits = (a.criteria || []).map(c => `<li>${escapeHtml(c)}</li>`).join('');
   return `
     <h3 style="font-size: 13px; margin: 12px 0 4px">验收标准</h3>
-    <div class="card" style="background: #0a0d12; padding: 8px; margin-bottom: 8px">
+    <div class="card" style="background: var(--inset); padding: 8px; margin-bottom: 8px">
       <ul style="margin: 0 0 0 16px; padding: 0; font-size: 12px">${crits}</ul>
       <div class="muted" style="font-size: 11px; margin-top: 4px">
         验收方: <b>${escapeHtml(a.verifier || '-')}</b> ·
@@ -1901,7 +1915,7 @@ function renderVerifyHistory(history) {
       <span class="tid">${escapeHtml(v.verifier || '-')}</span>
       <span class="muted">分数 ${(v.score || 0).toFixed(2)}</span>
       <span class="muted">${fmtTime(v.at)}</span>
-      ${v.issues ? `<span style="color: #f85149">${escapeHtml(v.issues)}</span>` : ''}
+      ${v.issues ? `<span style="color: var(--err)">${escapeHtml(v.issues)}</span>` : ''}
     </div>
   `).join('');
   return `
@@ -1912,13 +1926,13 @@ function renderVerifyHistory(history) {
 
 function renderVerifyActions(tid) {
   return `
-    <div class="card" style="background: #0a0d12; padding: 8px; margin-top: 8px; border: 1px solid #1f6feb">
+    <div class="card" style="background: var(--inset); padding: 8px; margin-top: 8px; border: 1px solid var(--accent-btn)">
       <p class="muted" style="font-size: 12px; margin-bottom: 6px">任务在 verifying 状态 —— 手动写验收结果：</p>
       <div style="display: flex; gap: 6px; align-items: center">
-        <input type="text" id="verifier-name" value="用户" placeholder="verifier" style="width: 100px; background: #161b22; border: 1px solid #21262d; color: #e6edf3; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-        <input type="text" id="verify-issues" placeholder="issues（不通过原因）" style="flex: 1; background: #161b22; border: 1px solid #21262d; color: #e6edf3; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-        <button onclick="submitVerify('${escapeHtml(tid)}', true)" style="background: #2ea043; color: #fff; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">✓ 通过</button>
-        <button onclick="submitVerify('${escapeHtml(tid)}', false)" style="background: #f85149; color: #fff; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">✗ 不通过</button>
+        <input type="text" id="verifier-name" value="用户" placeholder="verifier" style="width: 100px; background: var(--panel); border: 1px solid var(--border-dim); color: var(--text); padding: 4px 8px; font-size: 12px;">
+        <input type="text" id="verify-issues" placeholder="issues（不通过原因）" style="flex: 1; background: var(--panel); border: 1px solid var(--border-dim); color: var(--text); padding: 4px 8px; font-size: 12px;">
+        <button onclick="submitVerify('${escapeHtml(tid)}', true)" style="background: var(--ok); color: #fff; border: none; padding: 4px 12px; cursor: pointer; font-size: 12px;">✓ 通过</button>
+        <button onclick="submitVerify('${escapeHtml(tid)}', false)" style="background: var(--err); color: #fff; border: none; padding: 4px 12px; cursor: pointer; font-size: 12px;">✗ 不通过</button>
       </div>
     </div>
   `;

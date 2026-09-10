@@ -2,41 +2,61 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>mcp-hub 仪表盘</title>
+<title>子智能体</title>
 <script>
 // 主题：默认月之暗面；localStorage 存了 moon-light 才切亮面（CSS 加载前设置避免闪烁）
 document.documentElement.classList.toggle('moon-light', localStorage.getItem('mcp-hub-theme') === 'moon-light');
 </script>
-<link rel="stylesheet" href="/static/style.css?v=20260908">
+<link rel="stylesheet" href="/static/style.css?v=20260910c">
 </head>
 <body>
 
 <header>
-  <h1>mcp-hub 仪表盘</h1>
+  <h1>子智能体</h1>
   <div class="header-right">
     <button id="theme-toggle" title="切换主题">☾ 月之暗面</button>
     <span id="last-update" class="muted">—</span>
     <span id="auto-refresh-status" class="muted">⏸ 已暂停</span>
     <button id="refresh-btn">↻ 刷新</button>
-    <label><input type="checkbox" id="auto-refresh" checked> 自动刷新（2秒）</label>
+    <label><input type="checkbox" id="auto-refresh" checked> 自动更新</label>
   </div>
 </header>
 
 <nav class="tabs">
-  <button class="tab-btn active" data-tab="overview">总览</button>
+  <button class="tab-btn active" data-tab="connect">连接</button>
+  <button class="tab-btn" data-tab="overview">总览</button>
   <button class="tab-btn" data-tab="dispatch">派活</button>
   <button class="tab-btn" data-tab="runtimes">运行时</button>
   <button class="tab-btn" data-tab="subagents">子 Agent</button>
+  <button class="tab-btn" data-tab="crew">监督</button>
   <button class="tab-btn" data-tab="cluster">集群</button>
   <button class="tab-btn" data-tab="tasks">任务</button>
   <button class="tab-btn" data-tab="usage">用量</button>
-  <button class="tab-btn" data-tab="risk">风控</button>
 </nav>
 
 <main>
 
+  <!-- 连接：用户亲手联机，发布包不预连任何 CLI / 网关 -->
+  <section class="tab" id="tab-connect">
+    <div class="card" style="margin-bottom: 16px">
+      <h2>CLI 运行时</h2>
+      <p class="muted" style="font-size: 12px; margin-bottom: 8px">
+        本机装了也不自动派活。请先在各 CLI 自己的窗口完成登录，再在这里点「连接」。
+        断开后 spawn 会拒绝该 runtime。
+      </p>
+      <div id="connect-runtimes"><div class="muted">加载中...</div></div>
+    </div>
+    <div class="card">
+      <h2>多模态工具</h2>
+      <p class="muted" style="font-size: 12px; margin-bottom: 8px">
+        不预填任何网关或密钥。需要时自己填写并连接，密钥只存在本机。
+      </p>
+      <div id="connect-tools"><div class="muted">加载中...</div></div>
+    </div>
+  </section>
+
   <!-- 总览 -->
-  <section class="tab" id="tab-overview">
+  <section class="tab hidden" id="tab-overview">
     <div class="grid">
       <div class="card">
         <h2>运行时 <span id="runtime-count" class="badge">0</span></h2>
@@ -62,6 +82,31 @@ document.documentElement.classList.toggle('moon-light', localStorage.getItem('mc
     <div id="runtime-detail"></div>
   </section>
 
+  <!-- 监督：共同目标 + 黑板 + 解卡/纠偏 -->
+  <section class="tab hidden" id="tab-crew">
+    <div class="card" style="margin-bottom: 16px">
+      <h2>新任务组</h2>
+      <p class="muted" style="font-size: 12px; margin-bottom: 8px">
+        成员共用一个目标。跑着的时候用黑板 crew_post / crew_poll 通信（工作目录写入 .mcp.json）。模型由你指定、先在「连接」接入。卡死按日志 5 分钟无更新标出；走歪由你点「标走歪」。
+      </p>
+      <textarea id="crew-goal" rows="3" class="form-input" placeholder="共同目标，例如：把这个仓库的登录流程改成支持 SSO，保持现有测试通过"></textarea>
+      <div style="margin-top: 8px">
+        <button id="crew-create" class="btn-primary">创建任务组</button>
+        <span id="crew-create-status" class="muted" style="margin-left: 8px"></span>
+      </div>
+    </div>
+    <div class="split">
+      <div class="left">
+        <h2>任务组 <span id="crew-count" class="badge">0</span></h2>
+        <div id="crew-list"></div>
+      </div>
+      <div class="right">
+        <h2>监督台</h2>
+        <div id="crew-detail"><p class="muted">选左侧一个任务组</p></div>
+      </div>
+    </div>
+  </section>
+
   <!-- 子 Agent -->
   <section class="tab hidden" id="tab-subagents">
     <div class="split">
@@ -81,7 +126,7 @@ document.documentElement.classList.toggle('moon-light', localStorage.getItem('mc
     </div>
   </section>
 
-  <!-- 集群 -->
+  <!-- 集群：工人池流水线 + 任务组关系图（交流/监督） -->
   <section class="tab hidden" id="tab-cluster">
     <div id="cluster-detail"></div>
   </section>
@@ -95,11 +140,11 @@ document.documentElement.classList.toggle('moon-light', localStorage.getItem('mc
       </div>
       <p class="muted" style="font-size: 12px; margin-bottom: 8px">
         每行一个 model（格式：<code>runtime/model</code> 或纯 <code>model</code>）。
-        留空 = 显示全部。白名单保存到 <code>data/dashboard_state.json</code>，dashboard 重启不丢。
+        留空 = 显示已连接 runtime 的全部模型。白名单保存到本机 <code>data/dashboard_state.json</code>。
         <span class="muted">来源合并：<span id="pinned-source">.env + 此处</span></span>
         <br><span class="muted" style="font-size: 11px">💡 自动刷新不会清空你正在编辑的内容；白名单失焦自动保存。</span>
       </p>
-      <textarea id="pinned-models" rows="4" placeholder="例如：&#10;opencode-go/deepseek-v4-flash&#10;opencode-go/kimi-k3&#10;opencode-go/qwen3.7-plus&#10;kimi-code/kimi-for-coding" class="form-input" style="width: 100%; font-size: 12px; margin-top: 4px; font-family: monospace; resize: vertical;"></textarea>
+      <textarea id="pinned-models" rows="4" placeholder="例如：&#10;deepseek/deepseek-v4-flash&#10;deepseek/deepseek-v4-pro" class="form-input" style="width: 100%; font-size: 12px; margin-top: 4px; font-family: monospace; resize: vertical;"></textarea>
       <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px">
         <button id="pinned-save" class="btn-primary" style="padding: 6px 14px; font-weight: 500;">保存白名单</button>
         <button id="pinned-clear" class="btn" style="padding: 6px 14px;">清空（显示全部）</button>
@@ -215,32 +260,13 @@ document.documentElement.classList.toggle('moon-light', localStorage.getItem('mc
     </div>
   </section>
 
-  <!-- 风控 -->
-  <section class="tab hidden" id="tab-risk">
-    <div class="card" style="margin-bottom: 16px">
-      <h2>全局</h2>
-      <div id="risk-global"><div class="muted">加载中...</div></div>
-    </div>
-    <div class="card" style="margin-bottom: 16px">
-      <h2>调用热力图（近 24 小时，按小时聚合）</h2>
-      <div id="risk-heatmap"><div class="muted">加载中...</div></div>
-    </div>
-    <div class="card">
-      <h2>账号风控表</h2>
-      <p class="muted" style="font-size: 12px; margin-bottom: 8px">
-        按 API 账号/套餐分组统计。建议并发：免费池 1、订阅号 2~3、按量 key 放开；在飞超过建议并发的行会标红。
-      </p>
-      <div id="risk-accounts"><div class="muted">加载中...</div></div>
-    </div>
-  </section>
-</main>
-
 </main>
 
 <footer>
-  <span class="muted">mcp-hub 仪表盘 · 只读 · 2秒轮询</span>
+  <span class="muted">子智能体 · 模型用户自定 · 连接后才能派活 · 有变化再刷新</span>
 </footer>
 
-<script src="/static/app.js?v=20260908"></script>
+<script src="/static/idiomorph.min.js?v=0.7.4"></script>
+<script src="/static/app.js?v=20260910e"></script>
 </body>
 </html>

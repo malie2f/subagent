@@ -261,8 +261,8 @@ async def _recommend_model(task: str, priority: str = "balanced") -> dict[str, A
         is_deepseek_task = any(k in task_lower for k in ("deepseek", "ds", "深度求索"))
         is_free_intent = any(k in task_lower for k in ("免费", "批量", "兜底", "free"))
         if is_deepseek_task and model == "opencode/deepseek-v4-flash-free" and not is_free_intent:
-            model = "opencode-go/deepseek-v4-flash"
-            reason = f"[强制修正] DeepSeek 任务优先使用 Go 套餐: {reason}"
+            model = "deepseek/deepseek-v4-flash"
+            reason = f"[强制修正] DeepSeek 任务优先官方 flash: {reason}"
 
         return {
             "scenario": "llm_routed",
@@ -326,17 +326,17 @@ def _init() -> None:
             _logger.info("mmx 注入 api_key 成功（len=%d）", len(mmx_key))
         else:
             _logger.warning("mmx 没拿到 api_key，调用都会失败（需要 MMX_API_KEY 或 MINIMAX_API_KEY）")
-    # hedge-gateway：注入 .env 的 key/base_url（没有 key 网关回 401）
+    # hedge：仅当本机 .env 或连接页配了地址才挂上；发布默认不预置网关
     from .tools.hedge import HedgeAdapter
-    if "hedge" in _tools:
-        _tools["hedge"] = HedgeAdapter(
-            base_url=_settings.hedge_base_url,
-            api_key=_settings.hedge_api_key,
-        )
-        if _settings.hedge_api_key:
-            _logger.info("hedge 注入 api_key 成功（len=%d）", len(_settings.hedge_api_key))
-        else:
-            _logger.warning("hedge 没拿到 api_key（HEDGE_API_KEY），调用会 401")
+    hedge = HedgeAdapter(
+        base_url=_settings.hedge_base_url,
+        api_key=_settings.hedge_api_key,
+    )
+    if hedge.is_available():
+        _tools["hedge"] = hedge
+        _logger.info("hedge 已配置 base_url")
+    else:
+        _tools.pop("hedge", None)
     _aliases = _settings.model_aliases()
 
     # 并发信号量：0 = 不限
@@ -492,9 +492,9 @@ def _detect_caller(ctx: Context | None, fallback: str = "unknown") -> str:
 # ---------- MCP Server ----------
 
 mcp = FastMCP(
-    "mcp-hub",
+    "subagent",
     instructions=(
-        "MCP Hub —— 让当前 AI 把其他模型当工具用。"
+        "子智能体 —— 让当前 AI 把其他模型当工具用。模型由用户接入并指定。"
         "首次使用建议先看 list_runtimes / list_model_aliases；"
         "简单问答用 call_model，编程/多步任务用 spawn_subagent；"
         "runtime/model 都可传 'auto' 让 hub 自动路由。"
@@ -513,7 +513,9 @@ mcp = FastMCP(
         "8b) hedge_vision / hedge_image_generate / hedge_video_generate / hedge_models "
         "—— hedge-gateway（qwen 系视觉/生图/生视频，OpenAI 兼容）；"
         "9) list_workers / submit_cluster_task / scale_workers / cluster_stats "
-        "—— 多 worker 集群（默认 DeepSeek V4 Flash via OpenCode Go 套餐，N 个 worker 并行）。"
+        "—— 本机工人池（不是云端集群）。"
+        "10) crew_create / crew_add_member / crew_post / crew_poll / crew_status / crew_supervise "
+        "—— 任务组：共同目标；成员用 crew_post/crew_poll 经本 hub 通信；监督者解卡/纠偏。"
         "完整使用说明见项目根目录 MCP_USAGE.md。"
     ),
 )
@@ -592,9 +594,11 @@ async def list_runtimes() -> str:
     """
     _init()
     assert _runtimes is not None and _logger is not None
+    from .connections import runtime_connected
     info = []
     for r in _runtimes.values():
         d = r.info()
+        d["connected"] = runtime_connected(r.name)
         _logger.info("runtime %s: %s", d["name"], d.get("models", [])[:5])
         info.append(d)
     return json.dumps(
@@ -931,6 +935,31 @@ async def queue_status(task_id: str = "") -> str:
 
 # ---- 工具：便捷的"派活并等结果"组合 ----
 
+_PLACEHOLDER_CALLERS = frozenset({"", "unknown", "用户"})
+
+
+def _resume_caller_allowed(orig: str, current: str) -> bool:
+    """原 caller 与当前 caller 都可识别且不同 → 拒绝。占位符不拦（MCP 探测经常是 unknown）。"""
+    o = (orig or "").strip()
+    c = (current or "").strip()
+    if o in _PLACEHOLDER_CALLERS or c in _PLACEHOLDER_CALLERS:
+        return True
+    return o == c
+
+
+def _cluster_covers_topic(topic: str, for_model: str) -> bool:
+    """当前已启动的 cluster pool 会不会 claim 这条任务。"""
+    if _cluster is None or not _cluster.is_running:
+        return False
+    pool = _cluster.find_pool_by_topic(topic)
+    if pool is None:
+        return False
+    if not for_model:
+        return True
+    expected = f"{pool.spec.runtime}/{pool.spec.model}"
+    return for_model == expected or for_model == pool.spec.model
+
+
 @mcp.tool()
 async def dispatch_and_wait(
     topic: str,
@@ -943,14 +972,14 @@ async def dispatch_and_wait(
     webhook: str = "",
     ctx: Context | None = None,
 ) -> str:
-    """发布任务 → 循环 claim → 用 worker_model 处理 → complete，阻塞直到拿到结果。
+    """发布任务并阻塞等结果。
 
-    如果提供了 acceptance_json，会进入 verifying 流程（verifier 也要跑）。
-
-    适合"让另一个模型帮我干一件事"这种同步场景，但用队列解耦。
+    优先交给正在跑的 cluster worker（topic + for_model 对得上才等）。
+    没有匹配的 worker 时，本进程自己 claim + spawn_subagent + complete，
+    不再空等到超时。
     """
     _init()
-    assert _store is not None and _adapters is not None and _logger is not None
+    assert _store is not None and _logger is not None
     caller = _detect_caller(ctx, from_model)
 
     try:
@@ -958,7 +987,8 @@ async def dispatch_and_wait(
     except json.JSONDecodeError as e:
         return json.dumps({"ok": False, "error": f"acceptance_json 解析失败：{e}"})
 
-    # 1) publish
+    await _ensure_cluster_started_async()
+
     task = await _store.publish(
         topic=topic,
         payload=prompt,
@@ -972,7 +1002,67 @@ async def dispatch_and_wait(
         task.task_id, worker_model, caller, bool(acceptance), bool(webhook),
     )
 
-    # 2) 轮询直到完成 / 失败 / 超时
+    if not _cluster_covers_topic(topic, worker_model):
+        claimed = await _store.claim(topic=topic, worker=f"dispatch:{caller}", for_model=worker_model or None)
+        if claimed is None or claimed.task_id != task.task_id:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "cluster 未覆盖该 topic/model，且本进程未能认领刚发布的任务",
+                    "task_id": task.task_id,
+                    "hint": "打开 cluster 或改用 spawn_subagent",
+                },
+                ensure_ascii=False,
+            )
+        spawn_raw = await spawn_subagent(
+            runtime="auto",
+            model=worker_model or "auto",
+            task=prompt,
+            timeout_sec=timeout_sec,
+            wait=True,
+            from_model=caller,
+            ctx=ctx,
+        )
+        try:
+            spawn_data = json.loads(spawn_raw)
+        except json.JSONDecodeError:
+            spawn_data = {"ok": False, "error": spawn_raw[:500]}
+        inner = spawn_data.get("result") if isinstance(spawn_data.get("result"), dict) else {}
+        result_text = (
+            inner.get("summary")
+            or inner.get("stdout")
+            or spawn_data.get("error")
+            or ""
+        )
+        spawn_ok = bool(spawn_data.get("ok"))
+        err = None if spawn_ok else (spawn_data.get("error") or result_text[:500] or "spawn failed")
+        done, action = await _store.complete(
+            task_id=task.task_id,
+            worker=f"dispatch:{caller}",
+            result=result_text,
+            error=err,
+        )
+        if done is None:
+            return json.dumps(
+                {"ok": False, "error": "complete 失败", "next_action": action, "task_id": task.task_id, "spawn": spawn_data},
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "ok": action in ("done", "verifying") and not err,
+                "task_id": task.task_id,
+                "next_action": action,
+                "result": done.result,
+                "error": done.error,
+                "verify_history": done.verify_history,
+                "from_model": caller,
+                "executed_by": "self",
+                "spawn_task_id": spawn_data.get("task_id"),
+                "spawn_ok": spawn_ok,
+            },
+            ensure_ascii=False,
+        )
+
     elapsed = 0.0
     while elapsed < timeout_sec:
         await asyncio.sleep(poll_interval_sec)
@@ -988,6 +1078,7 @@ async def dispatch_and_wait(
                     "result": t.result,
                     "verify_history": t.verify_history,
                     "from_model": caller,
+                    "executed_by": "cluster",
                 },
                 ensure_ascii=False,
             )
@@ -998,14 +1089,16 @@ async def dispatch_and_wait(
                     "task_id": t.task_id,
                     "error": t.error or "failed",
                     "verify_history": t.verify_history,
+                    "executed_by": "cluster",
                 },
                 ensure_ascii=False,
             )
     return json.dumps(
         {
             "ok": False,
-            "error": f"timeout after {timeout_sec}s",
+            "error": f"timeout after {timeout_sec}s（cluster worker 未在时限内完成）",
             "task_id": task.task_id,
+            "hint": "看 list_workers / queue_status；超时任务仍在队列里",
         },
         ensure_ascii=False,
     )
@@ -1094,7 +1187,7 @@ async def spawn_subagent(
             inferred_runtime = "claude"
         elif resolved_model.startswith("qoder/"):
             inferred_runtime = "qoder"
-        elif resolved_model.startswith(("opencode-go/", "opencode/", "botcf/", "qwen/", "zen-v4f/", "zen-free/", "deepseek/", "tokenrhythm/")):
+        elif resolved_model.startswith(("opencode-go/", "opencode/", "botcf/", "qwen/", "zen-v4f/", "zen-free/", "deepseek/", "tokenrhythm/", "mimo-gw/")):
             inferred_runtime = "opencode"
         elif resolved_model.startswith("antigravity/"):
             inferred_runtime = "antigravity"
@@ -1148,6 +1241,10 @@ async def spawn_subagent(
             },
             ensure_ascii=False,
         )
+
+    from .connections import connection_denied, runtime_connected
+    if _settings.hub_require_runtime_connection and not runtime_connected(runtime):
+        return json.dumps(connection_denied("runtime", runtime), ensure_ascii=False)
 
     # 允许 runtime 原生模型名（如 antigravity 的 gemini-3.5-flash-medium）
     if "/" not in model:
@@ -1662,7 +1759,7 @@ async def resume_subagent(
     返回 JSON：{ok, task_id(新), resumed_from, session_id, ...}
     """
     _init()
-    assert _runtimes is not None and _logger is not None
+    assert _runtimes is not None and _logger is not None and _settings is not None
     with _registry_lock():
         reg = _registry_load_unlocked()
     entry = reg.get("subagents", {}).get(task_id)
@@ -1677,6 +1774,9 @@ async def resume_subagent(
             {"ok": False, "error": f"runtime '{entry.get('runtime')}' 当前不可用"},
             ensure_ascii=False,
         )
+    from .connections import connection_denied, runtime_connected
+    if _settings.hub_require_runtime_connection and not runtime_connected(rt.name):
+        return json.dumps(connection_denied("runtime", rt.name), ensure_ascii=False)
     if not getattr(rt, "supports_resume", False):
         return json.dumps(
             {"ok": False, "error": f"runtime '{rt.name}' 不支持续跑（supports_resume=False）"},
@@ -1708,6 +1808,18 @@ async def resume_subagent(
             ensure_ascii=False,
         )
 
+    orig_caller = (entry.get("caller") or "").strip()
+    this_caller = _detect_caller(ctx, "unknown")
+    if not _resume_caller_allowed(orig_caller, this_caller):
+        return json.dumps(
+            {
+                "ok": False,
+                "error": f"无权续跑：原任务 caller={orig_caller}，当前={this_caller}",
+                "task_id": task_id,
+            },
+            ensure_ascii=False,
+        )
+
     import uuid
     new_id = uuid.uuid4().hex[:12]
     model = entry.get("model") or ""
@@ -1720,8 +1832,7 @@ async def resume_subagent(
             "（系统自动续跑：上次执行中断。请基于当前进度继续完成原任务，"
             "不要从头开始；已产出的文件和分析直接复用。）\n\n原任务：\n" + orig_prompt
         )
-    # 原 caller 是占位符（unknown/空）时重新探测，否则继承
-    caller = _detect_caller(ctx, entry.get("caller") or "unknown")
+    caller = orig_caller if orig_caller and orig_caller not in _PLACEHOLDER_CALLERS else this_caller
 
     if _subagent_sem is not None:
         await _subagent_sem.acquire()
@@ -1846,6 +1957,208 @@ async def usage_stats() -> str:
     return json.dumps(collect_usage(), ensure_ascii=False, indent=2)
 
 
+# ---- 任务组：共同目标 / 黑板 / 监督 ----
+
+@mcp.tool()
+async def crew_create(goal: str, supervisor: str = "用户") -> str:
+    """开一个任务组：成员共用目标，运行中用 crew_post / crew_poll 经 mcp-hub 通信。
+
+    返回 crew_id。接着用 crew_add_member 加人。
+    """
+    from .crew import create_crew
+    return json.dumps(create_crew(goal, supervisor=supervisor), ensure_ascii=False)
+
+
+@mcp.tool()
+async def crew_add_member(
+    crew_id: str,
+    role: str,
+    task: str,
+    runtime: str = "auto",
+    model: str = "auto",
+    workdir: str = ".",
+    timeout_sec: int = 1800,
+    ctx: Context | None = None,
+) -> str:
+    """给任务组加一名成员。会在 workdir 写入 .mcp.json 指向本机 mcp-hub，成员用 crew_post/crew_poll 通信。"""
+    _init()
+    from .crew import add_member, blackboard_digest, get_crew, inject_mcp_config, wrap_worker_prompt
+    crew = get_crew(crew_id)
+    if not crew:
+        return json.dumps({"ok": False, "error": f"crew 不存在: {crew_id}"}, ensure_ascii=False)
+    inject_mcp_config(workdir)
+    prompt = wrap_worker_prompt(crew["goal"], role, task, blackboard_digest(crew), crew_id=crew_id)
+    spawn_raw = await spawn_subagent(
+        runtime=runtime,
+        model=model,
+        task=prompt,
+        workdir=workdir,
+        timeout_sec=timeout_sec,
+        wait=False,
+        from_model=f"crew:{crew_id}:{role}",
+        ctx=ctx,
+    )
+    try:
+        spawn_data = json.loads(spawn_raw)
+    except json.JSONDecodeError:
+        return spawn_raw
+    if not spawn_data.get("ok"):
+        return json.dumps({"ok": False, "spawn": spawn_data}, ensure_ascii=False)
+    added = add_member(
+        crew_id,
+        role=role,
+        runtime=spawn_data.get("runtime") or runtime,
+        model=spawn_data.get("model") or model,
+        task_id=spawn_data["task_id"],
+        prompt=prompt,
+        task=task,
+    )
+    return json.dumps({**added, "spawn": spawn_data, "goal": crew["goal"]}, ensure_ascii=False)
+
+
+@mcp.tool()
+async def crew_post(
+    crew_id: str,
+    text: str,
+    from_role: str = "member",
+    to: str = "",
+) -> str:
+    """给任务组黑板发消息。成员跑着的时候就调这个，不要等任务结束。
+
+    to 留空=全员可见；填同事的角色名=主要给他看。返回 seq，对方用 crew_poll 拉取。
+    """
+    from .crew import post
+    return json.dumps(post(crew_id, from_role, text, kind="note", to=to), ensure_ascii=False)
+
+
+@mcp.tool()
+async def crew_poll(crew_id: str, since_seq: int = 0, for_role: str = "") -> str:
+    """拉取黑板新消息（seq > since_seq）。成员应周期性调用。
+
+    for_role 填自己的角色：仍能看到全员消息，定向给别人的会过滤掉。
+    把返回的 last_seq 存下来，下次当作 since_seq。
+    """
+    from .crew import poll
+    return json.dumps(poll(crew_id, since_seq=since_seq, for_role=for_role), ensure_ascii=False)
+
+
+@mcp.tool()
+async def crew_status(crew_id: str = "") -> str:
+    """看任务组：成员是否卡死/走歪。crew_id 留空 = 列出进行中的组。"""
+    _init()
+    from .crew import get_crew, list_crews, public_crew
+    from .registry import _registry_load_unlocked, _registry_lock
+    with _registry_lock():
+        registry = _registry_load_unlocked()
+    if not crew_id:
+        return json.dumps(
+            {"ok": True, "crews": [public_crew(get_crew(c["crew_id"]), registry) for c in list_crews() if get_crew(c["crew_id"])]},
+            ensure_ascii=False,
+        )
+    crew = get_crew(crew_id)
+    if not crew:
+        return json.dumps({"ok": False, "error": f"crew 不存在: {crew_id}"}, ensure_ascii=False)
+    return json.dumps({"ok": True, "crew": public_crew(crew, registry)}, ensure_ascii=False)
+
+
+@mcp.tool()
+async def crew_supervise(
+    crew_id: str,
+    member_id: str,
+    action: str,
+    instruction: str = "",
+    timeout_sec: int = 1800,
+    ctx: Context | None = None,
+) -> str:
+    """监督者动作：unstick 解卡 / correct 纠正 / flag_off_track 标走歪 / flag_ok 取消标记 / kill 只停不续。
+
+    解卡和纠正会先停当前进程，再 resume（或新 spawn）并带上目标和黑板。
+    """
+    _init()
+    from .crew import (
+        blackboard_digest,
+        flag_member,
+        get_crew,
+        post,
+        update_member_task,
+        wrap_correct_prompt,
+        wrap_unstick_prompt,
+    )
+    from .registry import _kill_pid, _pid_alive, _registry_load_unlocked, _registry_lock, _registry_mark
+
+    crew = get_crew(crew_id)
+    if not crew:
+        return json.dumps({"ok": False, "error": f"crew 不存在: {crew_id}"}, ensure_ascii=False)
+    member = (crew.get("members") or {}).get(member_id)
+    if not member:
+        return json.dumps({"ok": False, "error": f"成员不存在: {member_id}"}, ensure_ascii=False)
+
+    action = (action or "").strip()
+    if action == "flag_off_track":
+        return json.dumps(flag_member(crew_id, member_id, "off_track", instruction), ensure_ascii=False)
+    if action == "flag_ok":
+        return json.dumps(flag_member(crew_id, member_id, "ok"), ensure_ascii=False)
+    if action not in ("unstick", "correct", "kill"):
+        return json.dumps(
+            {"ok": False, "error": "action 必须是 unstick / correct / flag_off_track / flag_ok / kill"},
+            ensure_ascii=False,
+        )
+
+    tid = member.get("task_id") or ""
+    with _registry_lock():
+        entry = _registry_load_unlocked().get("subagents", {}).get(tid) or {}
+    pid = entry.get("pid")
+    killed = False
+    if isinstance(pid, int) and pid > 0 and _pid_alive(pid):
+        h = _subagents.get(tid) if _subagents else None
+        rt = _runtimes.get(entry.get("runtime") or "") if _runtimes else None
+        if h is not None and rt is not None:
+            killed = bool(await rt.cancel(h))
+        if not killed:
+            killed = _kill_pid(pid)
+        _registry_mark(tid, "cancelled")
+
+    if action == "kill":
+        post(crew_id, "supervisor", f"停止 {member.get('role')} ({member_id[:6]})", "supervise")
+        update_member_task(crew_id, member_id, tid, status="cancelled")
+        return json.dumps({"ok": True, "action": "kill", "killed": killed, "task_id": tid}, ensure_ascii=False)
+
+    digest = blackboard_digest(crew)
+    if action == "correct":
+        if not (instruction or "").strip():
+            return json.dumps({"ok": False, "error": "correct 必须给 instruction"}, ensure_ascii=False)
+        prompt = wrap_correct_prompt(crew["goal"], member.get("role") or "worker", instruction, digest, crew_id=crew_id)
+        flag_member(crew_id, member_id, "off_track", instruction)
+    else:
+        prompt = wrap_unstick_prompt(crew["goal"], member.get("role") or "worker", digest, crew_id=crew_id)
+        flag_member(crew_id, member_id, "stuck", "监督者解卡")
+
+    resumed = json.loads(await resume_subagent(task_id=tid, task=prompt, timeout_sec=timeout_sec, wait=False, ctx=ctx))
+    new_tid = resumed.get("task_id") if resumed.get("ok") else None
+    if not resumed.get("ok"):
+        spawn_raw = await spawn_subagent(
+            runtime=member.get("runtime") or "auto",
+            model=member.get("model") or "auto",
+            task=prompt,
+            workdir=entry.get("workdir") or ".",
+            timeout_sec=timeout_sec,
+            wait=False,
+            from_model=f"crew:{crew_id}:supervisor",
+            ctx=ctx,
+        )
+        resumed = json.loads(spawn_raw)
+        new_tid = resumed.get("task_id")
+        resumed["fallback"] = "spawn"
+    if new_tid:
+        update_member_task(crew_id, member_id, new_tid, status="running")
+        post(crew_id, "supervisor", f"{action} {member.get('role')}: {instruction or '继续'}", "supervise")
+        flag_member(crew_id, member_id, "ok")
+    return json.dumps(
+        {"ok": bool(new_tid), "action": action, "killed": killed, "old_task_id": tid, "new_task_id": new_tid, "resume": resumed},
+        ensure_ascii=False,
+    )
+
+
 # ---- 工具：list_tools（多模态工具总览）----
 
 @mcp.tool()
@@ -1871,9 +2184,13 @@ async def list_tools() -> str:
 
 async def _mmx_call(operation: str, **kwargs) -> str:
     _init()
-    assert _tools is not None and _logger is not None
-    mmx = _tools.get("mmx")
-    if mmx is None:
+    assert _tools is not None and _logger is not None and _settings is not None
+    from .connections import connection_denied, tool_connected
+    if _settings.hub_require_runtime_connection and not tool_connected("mmx"):
+        return json.dumps(connection_denied("tool", "mmx"), ensure_ascii=False)
+    from .tools.mmx import MmxAdapter
+    mmx = MmxAdapter()
+    if not mmx.is_available():
         return json.dumps(
             {"ok": False, "error": "mmx 不可用（没装或不在 PATH）", "operation": operation},
             ensure_ascii=False,
@@ -2061,9 +2378,13 @@ async def mmx_video_get(task_id: str) -> str:
 
 async def _hedge_call(operation: str, **kwargs) -> str:
     _init()
-    assert _tools is not None and _logger is not None
-    hedge = _tools.get("hedge")
-    if hedge is None:
+    assert _logger is not None and _settings is not None
+    from .connections import connection_denied, tool_connected
+    from .tools.hedge import HedgeAdapter
+    if _settings.hub_require_runtime_connection and not tool_connected("hedge"):
+        return json.dumps(connection_denied("tool", "hedge"), ensure_ascii=False)
+    hedge = HedgeAdapter()
+    if not hedge.is_available():
         return json.dumps(
             {"ok": False, "error": "hedge 不可用（未配置 base_url）", "operation": operation},
             ensure_ascii=False,

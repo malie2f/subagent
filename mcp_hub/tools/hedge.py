@@ -1,10 +1,10 @@
 """hedge-gateway 多模态工具适配器 —— OpenAI 兼容 HTTP 网关（qwen 系）。
 
-默认地址 http://202.60.229.202:27941/v1（环境变量 HEDGE_BASE_URL 可覆盖；
-如网关将来要 key，设 HEDGE_API_KEY 会带 Authorization: Bearer）。
+地址和 key 都由本机配置提供：HEDGE_BASE_URL / HEDGE_API_KEY，或 dashboard
+「连接」页填写。发布版本不预置任何网关。
 
-CDN 图片下载：qwenlm.ai 在部分网络下被 RST，直连失败时自动走 HTTP 代理回退
-（HEDGE_DOWNLOAD_PROXY 可覆盖，默认取网关同 host 的 zen-gost :27942，设 off 禁用）。
+CDN 图片下载：直连失败时若设了 HEDGE_DOWNLOAD_PROXY 才走 HTTP 代理回退
+（设 off/none/direct 禁用）。不设则不代理。
 
 支持的操作：
   - vision          看图理解（chat/completions + image_url part；
@@ -31,7 +31,6 @@ from urllib.parse import urlparse
 
 from .base import ToolAdapter, ToolResult
 
-_DEFAULT_BASE_URL = "http://202.60.229.202:27941/v1"
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 网关 32MB 请求体上限，b64 膨胀 33% 后的安全线
 
 
@@ -45,18 +44,24 @@ class HedgeAdapter(ToolAdapter):
         super().__init__()
         import os
 
-        self._base_url = (
-            base_url or os.environ.get("HEDGE_BASE_URL") or _DEFAULT_BASE_URL
-        ).rstrip("/")
-        self._api_key = api_key or os.environ.get("HEDGE_API_KEY", "")
+        from mcp_hub.connections import tool_settings
+
+        ts = tool_settings("hedge")
+        settings_url = os.environ.get("HEDGE_BASE_URL", "")
+        settings_key = os.environ.get("HEDGE_API_KEY", "")
+        try:
+            from mcp_hub.config import load_settings
+            s = load_settings()
+            settings_url = settings_url or (s.hedge_base_url or "")
+            settings_key = settings_key or (s.hedge_api_key or "")
+        except Exception:  # noqa: BLE001
+            pass
+        self._base_url = (base_url or ts.get("base_url") or settings_url or "").rstrip("/")
+        self._api_key = api_key or ts.get("api_key") or settings_key or ""
         self._max_image_bytes = _MAX_IMAGE_BYTES
-        # CDN 下载代理回退：本机对 cdn.qwenlm.ai 被 RST 时走 VPS 出口（zen-gost）。
-        # 默认取网关同 host 的 :27942；HEDGE_DOWNLOAD_PROXY 覆盖，设 off/none/direct 禁用。
-        proxy = os.environ.get("HEDGE_DOWNLOAD_PROXY")
-        if proxy is None:
-            gw_host = urlparse(self._base_url).hostname or ""
-            proxy = f"http://{gw_host}:27942" if gw_host else ""
-        self._download_proxy = "" if proxy.lower() in ("off", "none", "direct") else proxy
+        # 只有显式配置了 HEDGE_DOWNLOAD_PROXY 才走代理，发布默认不指向任何第三方主机。
+        proxy = os.environ.get("HEDGE_DOWNLOAD_PROXY") or ""
+        self._download_proxy = "" if proxy.lower() in ("", "off", "none", "direct") else proxy
 
     def is_available(self) -> bool:
         # HTTP 服务没有"装没装"的概念；配了地址就算可用，通不通调用时见分晓

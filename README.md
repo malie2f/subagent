@@ -1,6 +1,8 @@
-# MCP Hub
+# 子智能体
 
-> **让多个 AI 编程工具（Claude Code / Codex / Kimi Code / OpenCode / MiniMax Code）通过统一协议互相调用、互相派活。**
+> **本机把多家 CLI 编程助手接到一张桌上：派活、任务组黑板、监督。模型由你接入、由你指定，不绑任何厂商。**
+>
+> MCP 接入名是 `subagent`。产品名是子智能体。Python 包仍是 `mcp_hub`。
 
 > **给其他模型/助手看的使用说明 → [MCP_USAGE.md](./MCP_USAGE.md)**
 
@@ -85,7 +87,7 @@ CUSTOM_OPENAI_MODEL=qwen2.5-coder:7b
 ```json
 {
   "mcpServers": {
-    "hub": {
+    "subagent": {
       "command": "python",
       "args": ["-m", "mcp_hub.server"],
       "cwd": "/path/to/mcp-hub"
@@ -103,7 +105,7 @@ CUSTOM_OPENAI_MODEL=qwen2.5-coder:7b
 **接入 Codex** —— `~/.codex/config.toml`：
 
 ```toml
-[mcp_servers.hub]
+[mcp_servers.subagent]
 command = "python"
 args = ["-m", "mcp_hub.server"]
 cwd = "/path/to/mcp-hub"
@@ -114,7 +116,7 @@ cwd = "/path/to/mcp-hub"
 ```json
 {
   "mcp": {
-    "hub": {
+    "subagent": {
       "type": "local",
       "command": ["python", "-m", "mcp_hub.server"],
       "cwd": "/path/to/mcp-hub"
@@ -130,7 +132,7 @@ cwd = "/path/to/mcp-hub"
 ```json
 {
   "mcpServers": {
-    "hub": {
+    "subagent": {
       "transport": "sse",
       "url": "http://127.0.0.1:8765/sse",
       "startupTimeoutMs": 30000,
@@ -145,7 +147,7 @@ cwd = "/path/to/mcp-hub"
 ```json
 {
   "mcpServers": {
-    "hub": {
+    "subagent": {
       "command": "python",
       "args": ["-m", "mcp_hub.server", "--transport", "stdio"],
       "cwd": "/path/to/mcp-hub"

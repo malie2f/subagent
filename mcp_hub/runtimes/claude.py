@@ -105,6 +105,12 @@ class ClaudeAdapter(RuntimeAdapter):
         super().__init__()
         self._stream_json_checked: bool | None = None
 
+    def login_hint(self) -> str:
+        return "在本机终端运行 `claude login`（或按官方文档登录）后，回到仪表盘点「连接」。"
+
+    def login_command(self) -> list[str] | None:
+        return [self.binary, "login"]
+
     def is_available(self) -> bool:
         # 只要 Claude Code CLI 安装了就算可用；具体某个 provider 有没有 key 在
         # list_models() 里过滤，spawn() 里再报清晰错误。

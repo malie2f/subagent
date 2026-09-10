@@ -1,8 +1,9 @@
-"""Dashboard API endpoints —— 只读，从 mcp-hub 的状态文件 + 模块拿数据。
+"""Dashboard API endpoints —— 监控 + 连接（密钥不进响应）。
 
 数据源：
     - TaskStore: 任务历史（data/tasks.json）
     - runtimes 模块: detect_all() 拿 runtime 列表
+    - data/connections.json: 用户在 UI 点过的 CLI / 工具连接（含本机密钥，不进 GET）
     - <workdir>/.mcp-hub/subagents/*.log: 子 agent 执行日志
     - .env 配置: cluster 配置 + queue 路径
     - data/dashboard_state.json: dashboard 自己存的状态（pinned models 等）
@@ -22,6 +23,14 @@ from mcp_hub.queue import TaskStore
 from mcp_hub.runtimes import detect_all
 from mcp_hub.runtimes.base import read_transcript
 from mcp_hub.tools import detect_all as detect_tools
+
+
+def file_mtime_ns(path: Path) -> int:
+    """文件修改时间；不存在则为 0。给 SSE 脏检查用。"""
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
 
 
 class DashboardState:
@@ -199,148 +208,461 @@ class DashboardState:
         d["by_model"] = [{"model": k, **v} for k, v in d["by_model"].items()]
         return {"ok": True, "ts": time.time(), **d}
 
-    # ---------- 风控（调用热力图 + 账号风控表） ----------
+    # ---------- 连接（用户在 UI 动手联机） ----------
 
-    # 账号分层：免费池限 1 并发，订阅号 2~3，按量 key 放开。
-    # (账号名, 档位, 建议并发, model 谓词) —— 顺序即优先级，先中先赢
-    _ACCOUNT_RULES = [
-        ("Zen 免费池", "免费", 1,
-         lambda m: m.startswith(("zen-v4f/", "zen-free/")) or m == "opencode/deepseek-v4-flash-free"),
-        ("DeepSeek 福利池（历史）", "免费", 1,
-         lambda m: m.startswith("deepseek-fuli/")),
-        ("OpenCode Go 套餐", "订阅", 3,
-         lambda m: m.startswith("opencode-go/")),
-        ("OpenAI Codex 订阅", "订阅", 3,
-         lambda m: m.startswith(("gpt-", "openai/"))),
-        ("Google antigravity 号", "订阅", 2,
-         lambda m: m.startswith(("antigravity/", "gemini-"))),
-        ("Kimi Code 订阅", "订阅", 2,
-         lambda m: m.startswith("kimi-code/")),
-        ("BotCF 分组", "中转", 2,
-         lambda m: m.startswith(("botcf/", "botcf-claude/", "botcf-claude-stable/"))),
-        ("qwen 分组", "中转", 2,
-         lambda m: m.startswith("qwen/")),
-        ("tokenrhythm 中转", "中转", 2,
-         lambda m: m.startswith("tokenrhythm/")),
-        ("DeepSeek 官方 key", "按量", 8,
-         lambda m: m.startswith("deepseek/")),
-        ("hedge 网关（自建）", "按量", 8,
-         lambda m: m.startswith("hedge/")),
-        ("Moonshot 官方", "按量", 4,
-         lambda m: m.startswith("moonshot/")),
-        ("MiniMax 官方", "按量", 4,
-         lambda m: m.startswith("minimax/")),
-    ]
-
-    @classmethod
-    def _account_of(cls, model: str) -> tuple[str, str, int]:
-        for name, tier, conc, pred in cls._ACCOUNT_RULES:
-            if pred(model):
-                return name, tier, conc
-        return "其他", "未知", 1
-
-    def risk_board(self) -> dict[str, Any]:
-        """调用热力图（近 24h，model × 小时）+ 账号风控表（按 API 账号/套餐分组）。
-
-        数据全部来自 subagents_registry.json：每次 spawn 一条，
-        含 model/started_at/finished_at/status/stderr_tail。
-        """
+    def connections(self) -> dict[str, Any]:
+        """列出所有 runtime / 工具的安装与连接状态。不含任何密钥。"""
         self._ensure()
-        registry = self._registry_load()
-        entries = list((registry.get("subagents") or {}).values())
-        now = time.time()
+        from mcp_hub.connections import public_tool_view, runtime_connected
+        from mcp_hub.runtimes import REGISTRY
+        from mcp_hub.tools.hedge import HedgeAdapter
+        from mcp_hub.tools.mmx import MmxAdapter
 
-        # ---- 热力图：近 24 小时 × model（取调用最多的 10 个）----
-        HOURS = 24
-        bucket0 = int(now // 3600) - (HOURS - 1)  # 最早一个整点桶
-        per_model: dict[str, dict[int, int]] = {}
-        totals: dict[str, int] = {}
-        for e in entries:
-            ts = e.get("started_at") or 0
-            b = int(ts // 3600) - bucket0
-            if not 0 <= b < HOURS:
+        runtimes = []
+        for name, cls in REGISTRY.items():
+            try:
+                a = cls()
+            except Exception as e:  # noqa: BLE001
+                runtimes.append({
+                    "name": name, "installed": False, "ready": False,
+                    "connected": False, "error": str(e)[:200],
+                })
                 continue
-            model = e.get("model") or "?"
-            cell = per_model.setdefault(model, {})
-            cell[b] = cell.get(b, 0) + 1
-            totals[model] = totals.get(model, 0) + 1
-        top = sorted(totals, key=lambda m: totals[m], reverse=True)[:10]
-        hours = [time.strftime("%H:%M", time.localtime((bucket0 + i) * 3600)) for i in range(HOURS)]
-        heat_rows = []
-        heat_max = 0
-        for m in top:
-            cells = [per_model[m].get(i, 0) for i in range(HOURS)]
-            heat_max = max(heat_max, max(cells))
-            heat_rows.append({"model": m, "cells": cells, "total": totals[m]})
-
-        # ---- 账号风控表 ----
-        throttle_re = re.compile(r"429|throttl|rate.?limit|quota", re.I)
-        accounts: dict[str, dict[str, Any]] = {}
-        for e in entries:
-            model = e.get("model") or "?"
-            name, tier, conc = self._account_of(model)
-            a = accounts.setdefault(name, {
-                "account": name, "tier": tier, "suggested_concurrency": conc,
-                "total": 0, "calls_24h": 0, "calls_7d": 0,
-                "done": 0, "dead": 0, "running": 0, "throttle_hits": 0,
-                "last_call_at": 0.0, "last_dead_at": 0.0,
-                "_dur_sum": 0.0, "_dur_n": 0, "_models": {},
+            installed = bool(a.is_installed())
+            runtimes.append({
+                "name": name,
+                "binary": a.binary,
+                "installed": installed,
+                "ready": installed,
+                "connected": runtime_connected(name),
+                "supports_resume": bool(getattr(a, "supports_resume", False)),
+                "login_hint": a.login_hint(),
+                "has_login_command": a.login_command() is not None,
+                "models": [],
             })
-            ts = e.get("started_at") or 0
-            a["total"] += 1
-            if now - ts < 86400:
-                a["calls_24h"] += 1
-            if now - ts < 7 * 86400:
-                a["calls_7d"] += 1
-            status = e.get("status") or ""
-            if status == "done":
-                a["done"] += 1
-            elif status == "running":
-                a["running"] += 1
-            else:
-                a["dead"] += 1
-                a["last_dead_at"] = max(a["last_dead_at"], e.get("finished_at") or ts)
-                tail = e.get("stderr_tail") or ""
-                if tail and throttle_re.search(tail):
-                    a["throttle_hits"] += 1
-            a["last_call_at"] = max(a["last_call_at"], ts)
-            fin = e.get("finished_at") or 0
-            if fin > ts:
-                a["_dur_sum"] += fin - ts
-                a["_dur_n"] += 1
-            models = a["_models"]
-            models[model] = models.get(model, 0) + 1
 
-        rows = []
-        for a in accounts.values():
-            models = a.pop("_models")
-            finished = a["done"] + a["dead"]
-            rows.append({
-                "account": a["account"], "tier": a["tier"],
-                "suggested_concurrency": a["suggested_concurrency"],
-                "total": a["total"], "calls_24h": a["calls_24h"], "calls_7d": a["calls_7d"],
-                "done": a["done"], "dead": a["dead"], "running": a["running"],
-                "success_rate": round(a["done"] / finished * 100, 1) if finished else None,
-                "throttle_hits": a["throttle_hits"],
-                "last_call_at": a["last_call_at"] or None,
-                "last_dead_at": a["last_dead_at"] or None,
-                "avg_duration_sec": round(a["_dur_sum"] / a["_dur_n"], 1) if a["_dur_n"] else None,
-                "top_models": sorted(models, key=lambda m: models[m], reverse=True)[:3],
-            })
-        rows.sort(key=lambda r: r["calls_7d"], reverse=True)
-
+        hedge = HedgeAdapter()
+        mmx = MmxAdapter()
+        tools = [
+            public_tool_view("hedge", {
+                "installed": True,
+                "ready": bool(hedge.is_available()),
+                "needs": ["base_url"],
+                "hint": "填写 OpenAI 兼容网关的 Base URL（以及可选 API Key），不预置任何地址。",
+            }),
+            public_tool_view("mmx", {
+                "installed": bool(mmx.is_available()),
+                "ready": bool(mmx.is_available()),
+                "needs": ["api_key"],
+                "hint": "需要本机已安装 mmx CLI。Key 和 region（cn/global）在此填写，不会写进发布包。",
+            }),
+        ]
         return {
             "ok": True,
-            "ts": now,
-            "records": len(entries),
-            "heatmap": {"hours": hours, "rows": heat_rows, "max": heat_max},
-            "accounts": rows,
-            "global": {
-                "running": sum(1 for e in entries if e.get("status") == "running"),
-                # 0 = 不限制，对前端返回 None
-                "limit": self._settings.hub_max_concurrent_subagents or None,
-            },
+            "ts": time.time(),
+            "require_connection": bool(self._settings.hub_require_runtime_connection),
+            "runtimes": runtimes,
+            "tools": tools,
         }
+
+    def connect_runtime(self, name: str, open_login: bool = False) -> dict[str, Any]:
+        """用户点击「连接」。未安装则拒绝；需要登录时可弹出可见控制台。"""
+        self._ensure()
+        from mcp_hub.connections import set_runtime_connected
+        from mcp_hub.runtimes import REGISTRY
+
+        cls = REGISTRY.get(name)
+        if cls is None:
+            return {"ok": False, "error": f"未知 runtime: {name}"}
+        try:
+            a = cls()
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+        if open_login:
+            cmd = a.login_command()
+            if not cmd:
+                return {
+                    "ok": False,
+                    "need_login": True,
+                    "hint": a.login_hint(),
+                    "error": "该 CLI 没有可弹出的登录命令，请按说明在本机终端自行登录后再点「连接」。",
+                }
+            self._open_login_console(cmd)
+
+        if not a.is_installed():
+            return {"ok": False, "error": f"未安装 {a.binary}，请先安装该 CLI"}
+        try:
+            ready = bool(a.is_available())
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"探测失败: {e}"[:300], "hint": a.login_hint()}
+        if not ready:
+            return {
+                "ok": False,
+                "need_login": True,
+                "hint": a.login_hint(),
+                "error": "CLI 已安装但尚未就绪（多半没登录）。请先登录，再点「连接」。",
+            }
+        return set_runtime_connected(name, True, binary=a.binary)
+
+    def disconnect_runtime(self, name: str) -> dict[str, Any]:
+        from mcp_hub.connections import set_runtime_connected
+        return set_runtime_connected(name, False)
+
+    def connect_tool(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """连接 hedge / mmx。密钥只落本机 connections.json，响应里不回传。"""
+        self._ensure()
+        if name not in ("hedge", "mmx"):
+            return {"ok": False, "error": f"未知工具: {name}"}
+        from mcp_hub.connections import set_tool_connected
+        base_url = str(payload.get("base_url") or "").strip()
+        api_key = str(payload.get("api_key") or "").strip()
+        region = str(payload.get("region") or "").strip()
+        if name == "hedge" and not base_url:
+            from mcp_hub.connections import tool_settings
+            if not (tool_settings("hedge").get("base_url") or self._settings.hedge_base_url):
+                return {"ok": False, "error": "hedge 需要 Base URL"}
+        if name == "mmx":
+            from mcp_hub.tools.mmx import MmxAdapter
+            if not MmxAdapter().is_available():
+                return {"ok": False, "error": "未安装 mmx CLI"}
+        view = set_tool_connected(
+            name, True, base_url=base_url, api_key=api_key, region=region,
+        )
+        view["ok"] = True
+        return view
+
+    def disconnect_tool(self, name: str) -> dict[str, Any]:
+        from mcp_hub.connections import set_tool_connected
+        return set_tool_connected(name, False)
+
+    @staticmethod
+    def _open_login_console(cmd: list[str]) -> None:
+        """弹出可见控制台让用户自己登录。显式 CREATE_NEW_CONSOLE，覆盖默认无窗口。"""
+        import subprocess
+        import sys
+        kw: dict[str, Any] = {}
+        if sys.platform == "win32":
+            kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+        subprocess.Popen(cmd, **kw)
+
+    def crews(self, include_done: bool = False) -> dict[str, Any]:
+        from mcp_hub.crew import get_crew, list_crews, public_crew
+        registry = self._registry_load()
+        items = []
+        for c in list_crews(include_done=include_done):
+            raw = get_crew(c["crew_id"])
+            if raw:
+                items.append(public_crew(raw, registry))
+        return {"ok": True, "crews": items}
+
+    def crew(self, crew_id: str) -> dict[str, Any]:
+        from mcp_hub.crew import get_crew, public_crew
+        raw = get_crew(crew_id)
+        if not raw:
+            return {"ok": False, "error": f"crew 不存在: {crew_id}"}
+        return {"ok": True, "crew": public_crew(raw, self._registry_load())}
+
+    def crew_member_preview(self, crew_id: str, member_id: str) -> dict[str, Any]:
+        """监督预览窗：分工 + 最近思考/输出。解析失败仍返回分工。"""
+        from mcp_hub.crew import get_crew, preview_from_events
+
+        raw = get_crew(crew_id)
+        if not raw:
+            return {"ok": False, "error": f"crew 不存在: {crew_id}"}
+        member = (raw.get("members") or {}).get(member_id)
+        if not member:
+            return {"ok": False, "error": f"成员不存在: {member_id}"}
+        tid = member.get("task_id") or ""
+        events: list = []
+        live = False
+        if tid:
+            tr = self.subagent_transcript(tid)
+            if tr.get("ok"):
+                events = tr.get("events") or []
+                live = bool(tr.get("live"))
+        preview = preview_from_events(
+            events,
+            task=member.get("task") or "",
+            prompt=member.get("prompt") or "",
+        )
+        return {
+            "ok": True,
+            "crew_id": crew_id,
+            "member_id": member_id,
+            "role": member.get("role"),
+            "runtime": member.get("runtime"),
+            "model": member.get("model"),
+            "task_id": tid,
+            "status": member.get("status"),
+            "live": live,
+            **preview,
+        }
+
+    def crew_create(self, goal: str, supervisor: str = "用户") -> dict[str, Any]:
+        from mcp_hub.crew import create_crew
+        return create_crew(goal, supervisor=supervisor)
+
+    def crew_post(self, crew_id: str, text: str, from_role: str = "supervisor", to: str = "") -> dict[str, Any]:
+        from mcp_hub.crew import post
+        return post(crew_id, from_role, text, kind="note", to=to)
+
+    def crew_add_member_local(
+        self,
+        crew_id: str,
+        role: str,
+        task: str,
+        runtime: str,
+        model: str,
+        workdir: str = ".",
+    ) -> dict[str, Any]:
+        from mcp_hub.connections import runtime_connected
+        from mcp_hub.crew import add_member, blackboard_digest, get_crew, inject_mcp_config, wrap_worker_prompt
+        from mcp_hub.runtimes import detect_all
+
+        self._ensure()
+        crew = get_crew(crew_id)
+        if not crew:
+            return {"ok": False, "error": f"crew 不存在: {crew_id}"}
+        if not role.strip() or not task.strip():
+            return {"ok": False, "error": "role 和 task 必填"}
+        if self._settings.hub_require_runtime_connection and not runtime_connected(runtime):
+            return {"ok": False, "error": f"runtime '{runtime}' 未在连接页连接"}
+        runtimes = detect_all()
+        adapter = runtimes.get(runtime)
+        if adapter is None or not adapter.is_available():
+            return {"ok": False, "error": f"runtime '{runtime}' 不可用"}
+        inject_mcp_config(workdir or ".")
+        prompt = wrap_worker_prompt(crew["goal"], role, task, blackboard_digest(crew), crew_id=crew_id)
+        import threading
+        import uuid
+        task_id = uuid.uuid4().hex[:12]
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            handle = loop.run_until_complete(
+                adapter.spawn(
+                    task_id=task_id,
+                    model=model,
+                    task=prompt,
+                    workdir=workdir or ".",
+                    timeout_sec=1800,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            loop.close()
+            return {"ok": False, "error": f"spawn 失败: {e}"}
+        finally:
+            try:
+                loop.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+        registry = self._registry_load()
+        registry.setdefault("subagents", {})[task_id] = {
+            "runtime": runtime,
+            "model": model,
+            "pid": handle.pid,
+            "workdir": workdir or ".",
+            "log_file": str(handle.output_file) if handle.output_file else "",
+            "started_at": handle.started_at,
+            "caller": f"crew:{crew_id}:{role}",
+            "status": "running",
+            "prompt": prompt,
+        }
+        self._registry_save(registry)
+
+        def _watch() -> None:
+            lp = asyncio.new_event_loop()
+            try:
+                lp.run_until_complete(adapter.wait(handle, timeout_sec=1800))
+                registry = self._registry_load()
+                entry = registry.get("subagents", {}).get(task_id)
+                if entry:
+                    entry["status"] = "done"
+                    entry["finished_at"] = time.time()
+                    self._registry_save(registry)
+            except Exception:  # noqa: BLE001
+                registry = self._registry_load()
+                entry = registry.get("subagents", {}).get(task_id)
+                if entry:
+                    entry["status"] = "dead"
+                    entry["finished_at"] = time.time()
+                    self._registry_save(registry)
+            finally:
+                lp.close()
+
+        threading.Thread(target=_watch, daemon=True).start()
+
+        added = add_member(
+            crew_id, role=role, runtime=runtime, model=model, task_id=task_id, prompt=prompt, task=task,
+        )
+        return {**added, "task_id": task_id}
+
+    def crew_flag(self, crew_id: str, member_id: str, flag: str, reason: str = "") -> dict[str, Any]:
+        from mcp_hub.crew import flag_member
+        return flag_member(crew_id, member_id, flag, reason)
+
+    def crew_supervise_local(
+        self,
+        crew_id: str,
+        member_id: str,
+        action: str,
+        instruction: str = "",
+    ) -> dict[str, Any]:
+        """看板侧监督：kill 用 pid；unstick/correct 走 continue_subagent（同进程 resume）。"""
+        from mcp_hub.crew import (
+            blackboard_digest,
+            flag_member,
+            get_crew,
+            post,
+            update_member_task,
+            wrap_correct_prompt,
+            wrap_unstick_prompt,
+        )
+        crew = get_crew(crew_id)
+        if not crew:
+            return {"ok": False, "error": f"crew 不存在: {crew_id}"}
+        member = (crew.get("members") or {}).get(member_id)
+        if not member:
+            return {"ok": False, "error": f"成员不存在: {member_id}"}
+        tid = member.get("task_id") or ""
+        if action == "flag_off_track":
+            return flag_member(crew_id, member_id, "off_track", instruction)
+        if action == "flag_ok":
+            return flag_member(crew_id, member_id, "ok")
+        if action == "kill":
+            killed = self.cancel_subagent(tid)
+            post(crew_id, "supervisor", f"停止 {member.get('role')}", "supervise")
+            update_member_task(crew_id, member_id, tid, status="cancelled")
+            return {"ok": True, "action": "kill", "cancel": killed}
+
+        self.cancel_subagent(tid)
+        digest = blackboard_digest(crew)
+        if action == "correct":
+            if not (instruction or "").strip():
+                return {"ok": False, "error": "correct 必须给纠正指令"}
+            prompt = wrap_correct_prompt(crew["goal"], member.get("role") or "worker", instruction, digest, crew_id=crew_id)
+            flag_member(crew_id, member_id, "off_track", instruction)
+        elif action == "unstick":
+            prompt = wrap_unstick_prompt(crew["goal"], member.get("role") or "worker", digest, crew_id=crew_id)
+        else:
+            return {"ok": False, "error": "未知 action"}
+        spawned = self._spawn_followup_background(
+            original_task_id=tid,
+            prompt=prompt,
+            caller="supervisor",
+        )
+        new_tid = spawned.get("new_task_id")
+        if new_tid:
+            update_member_task(crew_id, member_id, new_tid, status="running")
+            post(crew_id, "supervisor", f"{action} {member.get('role')}: {instruction or '继续'}", "supervise")
+            flag_member(crew_id, member_id, "ok")
+        return {"ok": bool(spawned.get("ok")), "action": action, "old_task_id": tid, "spawn": spawned}
+
+    def _spawn_followup_background(self, original_task_id: str, prompt: str, caller: str) -> dict[str, Any]:
+        """cancel 之后再拉一个进程，wait 放到后台线程，HTTP 立刻返回。"""
+        import threading
+        import uuid
+        from mcp_hub.runtimes import detect_all
+        from mcp_hub.runtimes.base import SubagentHandle
+
+        registry = self._registry_load()
+        original = (registry.get("subagents") or {}).get(original_task_id) or {}
+        runtime_name = original.get("runtime") or ""
+        model = original.get("model") or ""
+        workdir = original.get("workdir") or "."
+        if not runtime_name or not model:
+            return {"ok": False, "error": "原任务缺少 runtime/model"}
+        adapter = detect_all().get(runtime_name)
+        if adapter is None:
+            return {"ok": False, "error": f"runtime '{runtime_name}' 不可用"}
+        new_task_id = uuid.uuid4().hex[:12]
+        session_id = original.get("session_id") or ""
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            if session_id and getattr(adapter, "supports_resume", False):
+                handle = loop.run_until_complete(
+                    adapter.resume_spawn(
+                        session_id=session_id,
+                        task_id=new_task_id,
+                        model=model,
+                        task=prompt,
+                        workdir=workdir,
+                        timeout_sec=1800,
+                    )
+                )
+            else:
+                log_path = original.get("log_file") or ""
+                use_resume = False
+                if log_path and getattr(adapter, "supports_resume", False):
+                    fake = SubagentHandle(
+                        pid=None, runtime=runtime_name, model=model, task_id=original_task_id,
+                        workdir=workdir, started_at=original.get("started_at") or time.time(),
+                        output_file=Path(log_path),
+                    )
+                    session_id = adapter.extract_session_id(fake) or ""
+                    use_resume = bool(session_id)
+                if use_resume:
+                    handle = loop.run_until_complete(
+                        adapter.resume_spawn(
+                            session_id=session_id, task_id=new_task_id, model=model,
+                            task=prompt, workdir=workdir, timeout_sec=1800,
+                        )
+                    )
+                else:
+                    handle = loop.run_until_complete(
+                        adapter.spawn(
+                            task_id=new_task_id, model=model, task=prompt,
+                            workdir=workdir, timeout_sec=1800,
+                        )
+                    )
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"spawn 失败: {e}"}
+        finally:
+            try:
+                loop.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+        registry = self._registry_load()
+        registry.setdefault("subagents", {})[new_task_id] = {
+            "runtime": runtime_name,
+            "model": model,
+            "pid": handle.pid,
+            "workdir": workdir,
+            "log_file": str(handle.output_file) if handle.output_file else "",
+            "started_at": handle.started_at,
+            "caller": caller,
+            "status": "running",
+            "prompt": prompt,
+            "resumed_from": original_task_id,
+        }
+        self._registry_save(registry)
+
+        def _watch() -> None:
+            lp = asyncio.new_event_loop()
+            try:
+                lp.run_until_complete(adapter.wait(handle, timeout_sec=1800))
+                registry = self._registry_load()
+                entry = registry.get("subagents", {}).get(new_task_id)
+                if entry:
+                    entry["status"] = "done"
+                    entry["finished_at"] = time.time()
+                    self._registry_save(registry)
+            except Exception:  # noqa: BLE001
+                registry = self._registry_load()
+                entry = registry.get("subagents", {}).get(new_task_id)
+                if entry:
+                    entry["status"] = "dead"
+                    entry["finished_at"] = time.time()
+                    self._registry_save(registry)
+            finally:
+                lp.close()
+
+        threading.Thread(target=_watch, daemon=True).start()
+        return {"ok": True, "new_task_id": new_task_id, "runtime": runtime_name, "model": model}
 
     def models_all(self) -> dict[str, Any]:
         """所有 runtime + model 列表（去重），按 runtime 分组。
@@ -353,9 +675,12 @@ class DashboardState:
         if self._models_all_cache and now - self._models_all_cache[0] < self.DETECT_TTL:
             return self._models_all_cache[1]
         runtimes = self._detect_runtimes()
+        from mcp_hub.connections import runtime_connected
         groups: dict[str, list[dict[str, Any]]] = {}
         all_models: list[dict[str, Any]] = []
         for rname, r in runtimes.items():
+            if self._settings.hub_require_runtime_connection and not runtime_connected(rname):
+                continue
             models = r.list_models()
             avail = r.is_available()  # 每个 runtime 探一次就够，别按模型数重复探
             groups[rname] = [{
@@ -1103,6 +1428,12 @@ class DashboardState:
         self._ensure()
         if not payload or not payload.strip():
             return {"ok": False, "error": "payload 不能为空"}
+        if not self._settings.hub_cluster_enabled or not self._settings.cluster_pool_specs():
+            return {
+                "ok": False,
+                "error": "集群未启用：.env 里 HUB_CLUSTER_ENABLED=false，没有 worker 会认领任务",
+                "hint": "要跑集群：设 HUB_CLUSTER_ENABLED=true、配 pool、重启 hub，并在「连接」页连上对应 CLI。否则用 spawn_subagent。",
+            }
 
         # 拼 acceptance 配置
         acceptance = None
@@ -1251,7 +1582,8 @@ class DashboardState:
             return {
                 "ok": True,
                 "enabled": False,
-                "note": "cluster 未启用",
+                "running": False,
+                "note": "未预挂工人池。模型由调用方在 spawn / 任务组加人时指定；先在连接页接入 runtime。",
             }
 
         # 解析多 pool 配置（不实际启动，只看 config + 队列）
@@ -1318,6 +1650,34 @@ class DashboardState:
                 "worker 实时状态以 mcp-hub server 进程为准（看 list_workers 工具）。"
             ),
         }
+
+    def watch_snapshot(self) -> dict[str, int]:
+        """看板关心的落盘文件签名，给 /api/events 做脏检查。"""
+        self._ensure()
+        q = Path(self._settings.hub_queue_path)
+        files = {
+            "tasks": q,
+            "subagents": q.with_name("subagents_registry.json"),
+            "crews": Path("./data/crews.json"),
+            "connections": Path("./data/connections.json"),
+            "dashboard": self.STATE_FILE,
+        }
+        return {k: file_mtime_ns(p) for k, p in files.items()}
+
+    def events_sse(self, interval: float = 1.0):
+        """SSE：有文件变化才推 dirty，否则心跳注释保活。"""
+        last: dict[str, int] = {}
+        yield "event: hello\ndata: {}\n\n"
+        while True:
+            snap = self.watch_snapshot()
+            if last:
+                keys = [k for k, v in snap.items() if last.get(k) != v]
+                if keys:
+                    payload = json.dumps({"keys": keys}, ensure_ascii=False)
+                    yield f"event: dirty\ndata: {payload}\n\n"
+            last = snap
+            time.sleep(interval)
+            yield ": ping\n\n"
 
     # ---------- Tasks ----------
 

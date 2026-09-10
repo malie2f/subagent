@@ -1,116 +1,127 @@
-# mcp-hub 接手文档
+# 子智能体接手文档
 
-> 写给下一位维护者/接手 agent。读完这份应该能：把服务拉起来、知道钱和流量从哪走、改完不踩坑。
-> 最后更新：2026-09-08（UI 硬边缘+双主题改版后）
+> 产品名 **子智能体**；MCP 接入名 **subagent**；仓库/Python 包仍是 `mcp-hub` / `mcp_hub`。读完应能：拉起服务、分清工人池 vs 任务组、改完不踩坑。模型由用户定义，不绑 mimo。
+> 最后更新：2026-09-08（dashboard 关系图 + 思考预览；8765/8766 需同时在听）
+> 仓库：`C:\Users\Lenovo\.minimax\agents\mavis\workspace\mcp-hub`
+> 本轮改动 **尚未 git commit**（工作区脏）。pytest：**125 passed**。
+
+---
 
 ## 这是什么
 
-一个跑在本机（Windows）的 MCP 服务，两件事：
+本机（Windows）子智能体调度。MCP 只是接入方式，不是产品名。三块能力：
 
-1. **子代理调度器**：把任务派给本机各种 CLI agent runtime（opencode / codex / kimi / grok / antigravity / dsh 等），带队列、验收流水线、cluster 池、死亡现场记录。
-2. **多模态工具网关**：封装 hedge-gateway（qwen 系视觉/生图/生视频）和 mmx（MiniMax 全家桶）成 MCP 工具。
+1. **子代理调度**：`spawn_subagent` 把活派给本机 CLI（opencode / claude / codex / kimi / grok / antigravity / dsh / qoder / zcode / codebuddy）。死亡现场落 `data/subagents_registry.json`。
+2. **任务组（crew）**：共同目标 + 黑板（`crew_post` / `crew_poll`）+ 监督者解卡/纠偏。这才是「多 AI 协作」。
+3. **本机工人池（cluster）**：一个 Python 进程里 N 个 asyncio worker 抢 JSON 队列。**不是** Kimi Work 那种云上多 Agent 集群。
 
-对外形态：一个 MCP server（SSE），任何 MCP 客户端接上就有 29 个工具可用；外加一个只读监控 dashboard。
+另有 hedge / mmx 多模态封装。对外：SSE `http://127.0.0.1:8765/sse` + dashboard `http://127.0.0.1:8766`。工具数以 `list_tools` 为准（远多于旧文档的 29）。
 
-## 服务拓扑
+---
 
-| 服务 | 地址 | 启动方式 |
+## 现在机器上开着什么
+
+| 服务 | 地址 | 说明 |
 |---|---|---|
-| hub MCP 服务 | http://127.0.0.1:8765/sse | `python -m mcp_hub --transport sse --port 8765` |
-| dashboard | http://127.0.0.1:8766 | `python -m mcp_hub.dashboard --port 8766` |
+| hub | http://127.0.0.1:8765/sse | 需 `python -m mcp_hub --transport sse --port 8765`。`start_mcp_hub.ps1` 在 hub 已占用端口时往往**只拉 dashboard**。 |
+| dashboard | http://127.0.0.1:8766 | 监督 / 集群 tab 有关系图 + 任务/思考预览。前端 `?v=20260909a`，轮询用 Idiomorph morph（不是 innerHTML）。8766 常掉，用 `python -m mcp_hub.dashboard --port 8766`。 |
 
-两个都由 `start_mcp_hub.ps1` 拉起（已在跑就跳过）。**注意：脚本注释说挂了登录自启计划任务，但 2026-09-08 实测系统里查不到这个任务——重启机器后要手动跑一次脚本。**
+工人 **不预挂固定池、不绑定任何厂商模型**。集群/任务组只是调度工具；`runtime` + `model` 由调用方传入。模型要先在本机接入（OpenCode provider 或连接页）。mimo 只是某次连通性试验用过的一种模型。
 
-### 重启操作手册（Git Bash）
+`.env`：`HUB_CLUSTER_ENABLED=false`，`HUB_CLUSTER_POOLS_JSON=[]`。
+
+---
+
+## 两套「集群」不要混
+
+| | 工人池 `cluster/` | 任务组 `crew.py` |
+|---|---|---|
+| 是什么 | 本机队列工人 | 共同目标 + 黑板 + 监督 |
+| 互相说话 | **否** | **是**（`crew_post` / `crew_poll`） |
+| 共同目标 | 无（各领各的活） | 有 |
+| 监督者 | 无 | dashboard「监督」或 `crew_supervise` |
+| 实验 | 工人池已关 | 1936–1972 三人年表，见下 |
+
+工人池：全在本机一个进程；`scale_workers` 加的是协程不是机器；claim 拼 `for_model` 时可能双重前缀 `opencode/opencode/mimo-v2.5-free`（已知小坑）；`list_workers` 可能报 `'size'`。
+
+---
+
+## 任务组怎么用
+
+MCP：
+
+- `crew_create(goal)`
+- `crew_add_member(crew_id, role, task, runtime, model, workdir)` — 写 workdir `.mcp.json` 指向 `http://127.0.0.1:8765/sse`
+- `crew_post(crew_id, text, from_role, to)` — `to` 空=全员
+- `crew_poll(crew_id, since_seq, for_role)` — 把 `last_seq` 记下下次用
+- `crew_status` / `crew_supervise(action=unstick|correct|flag_off_track|flag_ok|kill)`
+
+数据：`data/crews.json`。卡死：日志 5 分钟无更新或 pid 死了仍 running。走歪：**不自动发现**，人/另一个模型点「标走歪」。
+
+WebUI：http://127.0.0.1:8766 → **监督** 或 **集群**。任务组画成关系图：监督者、黑板、成员；箭头 = 黑板留言（`crew_post`）和监督动作。点成员节点，下面两个预览窗分别是分工 / 思考+最近输出。`GET /api/crews/<id>/members/<mid>/preview`。年表 markdown **不在网页里渲染**。8766 没起来就看不见。
+
+成员 CLI 必须读项目 `.mcp.json` 才会出现 `crew_post`。OpenCode 实测会。有的 CLI 只认用户级 MCP 配置，则邮局对它是摆设。
+
+---
+
+## 本轮代码改动（未 commit）
+
+实用化：连接页手动联机；发布默认不预置 VPS/密钥/号池；风控 tab 删除；hedge 无内置网关。
+
+修复：`dispatch_and_wait` 无 worker 时自己 claim+spawn+complete；cluster worker 走连接门闩；`resume_subagent` 校验 caller（占位符 unknown/用户不拦）。
+
+新文件：`mcp_hub/connections.py`、`mcp_hub/crew.py`、`tests/test_connections.py`、`tests/test_crew.py`、`tests/test_dispatch_resume.py`。
+
+---
+
+## 1936–1972 实验（测交流是否摆设）
+
+- crew_id：`104c34e4db46`
+- 模型：`opencode/mimo-v2.5-free` × 3（archivist-a/b/c）
+- 产物：`data/crew-mimo-1936/events-1936-1947.md` 等三个文件
+
+**邮局真通了**：transcript 里有 `mcp-hub_crew_post` / `mcp-hub_crew_poll`，黑板 seq 2–8 是成员自己发的。A poll 到 B/C 已开工后才写「无年段交叉」。
+
+**协作很浅**：没有定向 `to`、没有互改文件、没有对账。三条平行流水线 + 报进度。
+
+**内容质量差**：有条目但不是完整事件集，史实有张冠李戴。那是 mimo 能力，不是通信失败。
+
+---
+
+## 派活 / 回传 / 续聊（源码事实）
+
+`publish_task` 只入 `data/tasks.json`（pending）。认领要么别人 `claim_task`，要么（若用户自己开了）cluster worker。结果：`queue_status` 轮询，或发布时 webhook。`spawn_subagent` 不进队列。
+
+`resume_subagent` **无 ACL**，只有 caller 不同且双方都可识别才拒。支持 resume：opencode/codex/grok/qoder/codebuddy/antigravity。kimi/claude/dsh/zcode 没有原生同会话。
+
+`spawn_subagent` / `resume` / hedge / mmx 要连接页先连。`publish_task` 不检查连接。
+
+现网主力模型名是 `deepseek/deepseek-v4-flash` 等；文档里的 `opencode-go/*` 已经常 404。
+
+---
+
+## 规矩
+
+1. 改完 `python -m pytest -q`，目标 **125 passed**（旧文 124/123/109 过期）。
+2. 提交：`git -c user.name=mcp-hub -c user.email=hub@local commit`。**绝不 stage `mcp_hub/runtimes/qoder.py`**。
+3. `-32602` 必须带 CALLING_SPEC §2 自查清单。
+4. 别碰根目录 RE 产物：`valid_*.bin`、`dis_*.txt`、`ctr_*`。别 commit 也别删。
+5. 改 hub 代码必须重启 8765；改 dashboard 静态资源 bump `?v=` 并重启 8766。
+6. `.env` / `data/connections.json` / `data/crews.json` 含本机状态，不进发布包。
+
+## 坑
+
+1. Windows spawn 必须 `CREATE_NO_WINDOW`（已收口 asyncio + Popen）。
+2. SSE stateless，别依赖 MCP session。
+3. `start_mcp_hub.ps1` 不保证杀掉旧 hub 再起新代码。
+4. 登录自启计划任务文档写了，系统里经常没有。
+5. 仪表盘状态用 `/api/events` SSE（有文件变化才刷），2s 轮询只是 SSE 失败后备。DOM 更新走 `setHtml()` / Idiomorph。Flask 必须 `threaded=True`，否则 SSE 会堵住其它 API。
+
+## 自检
 
 ```bash
-# hub（8765）
-PID=$(netstat -ano | grep '127.0.0.1:8765' | grep LISTENING | awk '{print $NF}' | head -1) && taskkill //PID $PID //F
-# dashboard（8766）同理换端口。然后：
 cd /c/Users/Lenovo/.minimax/agents/mavis/workspace/mcp-hub
-powershell -NoProfile -ExecutionPolicy Bypass -File start_mcp_hub.ps1
-# 确认：netstat 看两个端口都 LISTENING；日志在 logs/hub.err.log / dashboard.err.log
+python -m pytest -q
+# 125 passed
+# 8765 和 8766 都应 LISTENING
 ```
-
-dashboard 改前端（templates/static）必须重启才生效（模板有缓存版本号 `?v=`，改了记得 bump，当前 `v=20260908`）。
-
-## 代码地图
-
-```
-mcp_hub/
-  server.py       MCP server 入口，工具注册/信封/错误富化
-  cli.py          CLI 入口
-  config.py       环境变量加载（.env）
-  registry.py     子代理注册表（死必报/死可查的落盘）
-  routing.py      模型 alias → 真实 runtime/model 路由
-  fallbacks.py    alias fallback 链
-  usage_stats.py  token/成本聚合
-  notify.py       webhook 通知
-  runtimes/       每个 CLI agent 一个适配器（base.py 是契约）
-  tools/          hedge.py（qwen 多模态）、mmx.py（MiniMax）
-  queue/          任务队列（topic/claim/complete/verify）
-  cluster/        worker 池（scale_workers 动态伸缩）
-  dashboard/      server.py + api.py + templates/index.html + static/{app.js,style.css}
-data/             subagents_registry.json、tasks 队列、dashboard_state.json（前端白名单）
-logs/             服务日志
-tests/            pytest，基线 109 过
-```
-
-## 外部依赖（挂了先查这里）
-
-| 依赖 | 位置 | 用途 |
-|---|---|---|
-| hedge-gateway | VPS 202.60.229.202:27941（实为 qwen2api docker 容器） | qwen 聊天/视觉/生图/生视频 |
-| zen-gost HTTP 代理 | VPS :27942 | 生图 CDN 下载回退（见"坑"#3） |
-| hedge-gateway Go 二进制 | VPS :27945（/root/hedge-gateway/） | 备用网关，当前未挂进 hub |
-| VPS SSH | `ssh -i ~/.ssh/vps_qwen root@202.60.229.202` | 唯一可用的钥匙（kimi_vps_key 不在授权列表） |
-| mmx | MiniMax API（.env 里 MINIMAX_*） | 语音/音乐/视频/搜索 |
-| moonshot / botcf-claude | .env 里各自 KEY/BASE_URL | 直连模型 API |
-
-配置全在 `.env`（`config.py` 读）。cluster 池子由 `HUB_CLUSTER_*` 系列变量定义。
-
-## 前端（dashboard）
-
-- 三件套：`templates/index.html` + `static/style.css` + `static/app.js`，无构建步骤，改完重启即生效。
-- **风格规约（2026-09-08 起）：硬边缘，禁止 border-radius / 软阴影；双主题「月之暗面」（默认）/「月之亮面」，全部颜色走 CSS 变量**——`:root` 是暗面，`html.moon-light` 覆盖成亮面，加新颜色时两处都要加变量，不许写死 hex。
-- 主题切换按钮在 header（`#theme-toggle`），存 localStorage `mcp-hub-theme`；防闪烁由 `<head>` 内联脚本负责。
-- tab：总览 / 派活 / 运行时 / 子 Agent / 集群 / 任务 / 用量 / 风控。
-- 派活 tab 的模型白名单存 `data/dashboard_state.json`，重启不丢。
-
-## 规矩（违反会被打回）
-
-1. **测试**：改完跑 `python -m pytest -q`，基线 109 过才算完。
-2. **提交**：`git -c user.name=mcp-hub -c user.email=hub@local commit`。**绝不 stage `mcp_hub/runtimes/qoder.py`**——那是别人的 WIP。
-3. **工具报错要带教程**：调用方参数错了必须返回 CALLING_SPEC.md §2 自查清单（信封层 -32602 和参数校验层都要），这是和其他 agent 协作的命根子，见 `CALLING_SPEC.md`。
-4. **别碰根目录的 RE 产物**：`valid_*.bin`、`dis_*.txt`、`ctr_*` 等是另一个逆向项目 subagent 倒进来的，不属于本仓库，别 commit 也别删（删前问）。
-5. MCP 客户端会话重启后 hub 要重启才能被本会话重新发现工具——改完 hub 代码记得重启 8765。
-
-## 坑（都踩过，别重踩）
-
-1. **Windows 子进程弹窗**：所有 spawn 必须过 `CREATE_NO_WINDOW` 注入（已收口到 asyncio + subprocess.Popen 两层），绕开就会弹一堆空控制台窗口把浏览器搞崩。
-2. **SSE stateless**：ServerSession 是强制 stateless 的，hub 重启后客户端重连不会重新 initialize，别加依赖 session 状态的逻辑。
-3. **cdn.qwenlm.ai 本机被 RST**：生图生成端一直好的，坏的是下载。`hedge.py` 的 `_download` 直连失败会自动走 VPS zen-gost :27942 代理（CONNECT 隧道，重试 3 次防上游轮询死节点），`HEDGE_DOWNLOAD_PROXY` 可覆盖、设 `off` 禁用。若 zen 号池重整，这条回退会一起挂。
-4. **子代理猝死**：`spawn_subagent` 有死亡现场（exit code/RSS/日志尾部落 registry）、webhook 终态通知、`resume_subagent` 续跑。排查先看 `data/subagents_registry.json` 和交付文件，再调 `subagent_status`。
-5. **qwen2api 上游风控**：agentic 调用偶发被上游拦，zen-v4f 免费池走 `opencode/zen-v4f/deepseek-v4-flash-free`。
-
-## 近期变更时间线（倒序）
-
-- `128e5d8` dashboard 硬边缘 UI + 月之暗面/月之亮面双主题（默认暗面）
-- `8cef149` hedge 图片 CDN 下载代理回退
-- `ca26e87` 接入 DeepSeek Harness（dsh --profile headless）
-- `65d011b` tokenrhythm（基元律动）接入
-- `c0cb02d` 风控 tab（调用热力图 + 账号风控表）
-- `b19ca38` DeepSeek 官方 v4-pro 走 opencode 接入
-- `fd40f47` antigravity 稳定性 + 会话映射
-- `a695272` 子代理死必报/死可查/死可续（P0）
-
-## 上手自检清单
-
-```bash
-cd /c/Users/Lenovo/.minimax/agents/mavis/workspace/mcp-hub
-python -m pytest -q          # 应 109 passed
-netstat -ano | grep -E '127.0.0.1:(8765|8766)' | grep LISTENING   # 两个都该在
-curl -s http://127.0.0.1:8766/ -o /dev/null -w '%{http_code}'     # 200
-```
-
-再开一个 MCP 客户端调 `list_runtimes` / `list_models`，能出列表 = 全链路通。

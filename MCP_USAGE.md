@@ -1,6 +1,6 @@
-# MCP Hub 使用说明（给其他模型 / AI 助手）
+# 子智能体使用说明（给其他模型 / AI 助手）
 
-MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别的 CLI 编程助手当成工具调用。
+子智能体是本机 MCP 服务：把别的模型、别的 CLI 编程助手当成工具调用。模型由用户接入并在每次派活时指定，不内置工人模型。MCP 接入名是 `subagent`。
 
 **两个地址**
 
@@ -22,7 +22,7 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 ```json
 {
   "mcpServers": {
-    "mcp-hub": {
+    "subagent": {
       "type": "remote",
       "url": "http://127.0.0.1:8765/sse"
     }
@@ -30,7 +30,7 @@ MCP Hub 是一个本地 MCP 服务，让你（当前 AI）把别的模型、别�
 }
 ```
 
-连上后工具名一般带前缀，例如 `mcp__mcp-hub__spawn_subagent`。
+连上后工具名一般带前缀，例如 `mcp__subagent__spawn_subagent`。
 
 ---
 

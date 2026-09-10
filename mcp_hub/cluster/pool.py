@@ -179,6 +179,26 @@ class ClusterPool:
                     await asyncio.sleep(self.spec.poll_interval_sec)
                     continue
 
+                from mcp_hub.config import load_settings
+                from mcp_hub.connections import runtime_connected
+                if load_settings().hub_require_runtime_connection and not runtime_connected(worker.runtime_name):
+                    err = (
+                        f"runtime '{worker.runtime_name}' 未在仪表盘连接，"
+                        "cluster worker 拒绝执行。打开 http://127.0.0.1:8766 「连接」页。"
+                    )
+                    _log.warning("worker %s 跳过 task=%s：%s", worker.worker_id, task.task_id, err)
+                    try:
+                        await store.complete(
+                            task_id=task.task_id,
+                            worker=worker.worker_id,
+                            result="",
+                            error=err,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    await asyncio.sleep(self.spec.poll_interval_sec)
+                    continue
+
                 # 跑这个任务
                 await self._run_one(worker, runtime, task)
         except asyncio.CancelledError:

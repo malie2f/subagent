@@ -46,10 +46,14 @@ class MmxAdapter(ToolAdapter):
         key 优先级：显式传入 > 环境变量 MMX_API_KEY > 空
         """
         super().__init__()
+        from mcp_hub.connections import tool_settings
+
+        ts = tool_settings("mmx")
         if not api_key:
             import os
-            api_key = os.environ.get("MMX_API_KEY", "")
+            api_key = ts.get("api_key") or os.environ.get("MMX_API_KEY", "")
         self._api_key = api_key
+        self._region = (ts.get("region") or "").strip()
 
     def is_available(self) -> bool:
         return (
@@ -72,13 +76,13 @@ class MmxAdapter(ToolAdapter):
         重要：mmx 要求 --api-key 放在子命令之前（在 resource 前面），
         实测 `mmx --api-key xxx quota show` 成功，而 `mmx quota --api-key xxx show` 失败。
         """
-        if not self._api_key:
-            return cmd
-        # cmd[0] 是绝对路径（如 C:\\...\\mmx.CMD），不能直接和 self.binary 比。
-        # 只要 cmd 至少有 binary + resource + command 3 段就注入。
-        if len(cmd) >= 3:
-            new_cmd = [cmd[0], "--api-key", self._api_key] + cmd[1:]
-            return new_cmd
+        extra: list[str] = []
+        if self._api_key:
+            extra += ["--api-key", self._api_key]
+        if getattr(self, "_region", ""):
+            extra += ["--region", self._region]
+        if extra and len(cmd) >= 3:
+            return [cmd[0]] + extra + cmd[1:]
         return cmd
 
     async def call(self, operation: str, **kwargs: Any) -> ToolResult:

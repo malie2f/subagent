@@ -97,65 +97,33 @@
 - `hedge_image_generate(prompt, size, n, out_dir/out)`：生图落盘（已实测）。
 - `hedge_video_generate(prompt, duration, resolution, out)`：生视频（网关侧代码在未实测，响应原样透传）。
 - `hedge_models()`：列网关模型（130+，qwen3.5–3.8 全系含 -image/-video/-search 后缀）。
-- 网关要 key：hub `.env` 的 `HEDGE_API_KEY` / `HEDGE_BASE_URL`（缺 key 回 401）。
+- 网关地址和 key 在 dashboard「连接」页填写（或本机 `.env`），发布包不预置。
 
-## 4. runtime ↔ model 配对表（2026-08-02 实测存活）
+## 4. runtime ↔ model
 
-| runtime | 可用 model | 分工 |
-|---|---|---|
-| `opencode` | `opencode-go/deepseek-v4-flash` | **主力**，杂活默认走它，快且便宜 |
-| `opencode` | `opencode-go/glm-5.2` | 质量档，难活升档 |
-| `opencode` | `opencode-go/deepseek-v4-pro` | 质量档备选 |
-| `opencode` | `opencode-go/minimax-m3` | 备选 |
-| `opencode` | `opencode/deepseek-v4-flash-free` | 免费档，**只给极小任务** |
-| `qoder` | `Qwen3.8-Max-Preview` | Qoder qwen3.8max |
-| `qoder` | `Qwen3.7-Max` | Qoder qwen3.7max |
-| `qoder` | `Qwen3.7-Plus` | Qoder qwen3.7plus |
-| `qoder` | `DeepSeek-V4-Pro` | Qoder deepseek-v4-pro |
-| `qoder` | `DeepSeek-V4-Flash` | Qoder deepseek-v4-flash |
-| `qoder` | `GLM-5.2` | Qoder glm-5.2 |
-| `qoder` | `Kimi-K2.7-Code` | Qoder kimi-k2.7-code |
-| `qoder` | `MiniMax-M2.7` | Qoder minimax-m2.7 |
-| `codex` | `gpt-5.6-sol` | 复杂推理/复杂代码/兜底 |
-| `codex` | `gpt-5.6-terra` | GPT 均衡档 |
-| `codex` | `gpt-5.6-luna` | 轻量/高频 |
-| `antigravity` | `gemini-3.6-flash-low` / `-medium` / `-high` | 快、多模态 coding |
-| `opencode` | `botcf/deepseek-v4-flash-free` | 免费档，**只给极小任务** |
-| `claude` | `botcf-claude/claude-opus-5` | Claude 最强推理/兜底（Claude Code CLI + botcf Anthropic 模式） |
-| `claude` | `botcf-claude/claude-opus-4-6` | Claude 强推理（Claude Code CLI + botcf Anthropic 模式） |
-| `claude` | `botcf-claude-stable/claude-opus-5` | 稳定通道（主通道超时时 fallback） |
-| `claude` | `botcf-claude-stable/claude-opus-4-6` | 稳定通道（主通道超时时 fallback） |
-| `claude` | `sonnet` / `opus` / `haiku` / `claude-opus-4-6` | 官方 Anthropic API key |
-| `kimi` | `kimi-code/kimi-for-coding` | 中文/长文本 |
-| `zcode` | `glm-5.2` / `glm-5.2-fast` | 需 zcode 已登录 |
-| `grok` | `grok-4.5` | **逆向/其它模型拒答的敏感任务**；美国服务必须走代理（hub 自动注入，无需配置）；xAI 订阅额度不按量计费 |
-| `qwen`（opencode 通道） | `qwen/qwen3.7-plus` | 可用 |
-| `zen-v4f`（opencode 通道） | `zen-v4f/deepseek-v4-flash-free` | **Zen 号池 DeepSeek V4 Flash（免费 204k），用量巨大的批量重活走这**；独占一组只此一个模型 |
-| `qwen2api`（opencode 通道） | `qwen/qwen3.8-max-preview`（含 `-thinking`） | ⚠️ 半复活：简单对话可用（curl 实测通），但带 system prompt/工具定义的 agentic 请求会被上游 WAF 风控拦截（"网关已按当前策略重试/切换账号但仍失败"）——spawn 派活暂不可用， alias `qwen3.8max` 首选仍是 qoder |
+**不要写死私人号池/中转。** 以本机 `list_runtimes` / `list_models` 为准，且该 runtime 必须已在 dashboard「连接」页点过连接，否则 `spawn_subagent` 会拒绝。
 
-**红线：**
-- `gpt-5.6-*` 必须配 `runtime="codex"`，配 `opencode` 会挂。
-- `gemini-3.6-flash-*` 必须配 `runtime="antigravity"`。
-- `opencode-go/*`、`opencode/*`、`qwen/*`、`zen-v4f/*`、`zen-free/*` 配 `runtime="opencode"`。
-- `botcf-claude/*`、`botcf-claude-stable/*` 配 `runtime="claude"`（Claude Code CLI + Anthropic SDK，baseURL `https://botcf.com`，**不要带 `/v1`**）。
-- `qoder/*` 配 `runtime="qoder"`（qoderclicn）。
-- `grok-4.5` 配 `runtime="grok"`（Grok Build CLI，二进制在 `~/.grok/bin/grok.exe`）。
-- `claude` runtime 支持官方 Anthropic API key，也支持 botcf。
-- mcp-hub 已为每个 Claude Code 子 agent 隔离 `~/.claude/settings.json`，避免你本地其他 Claude Code 配置（如 DeepSeek）覆盖当前 key。
-- **死掉的通道（已拉黑，禁止派发）**：`botcf/deepseek-v4-flash`（空包）、`botcf/deepseek-v4-pro`（空包）、`botcf/mimo-v2.5-pro`（空包）、`botcf/饿了么5.2`、`botcf/寄了么5.2`、`botcf/克劳德欧帕兹五点二`、`zhipuai/glm-5.2`（服务端 500）、`minimax/MiniMax-M3` 直连（空响应；要走 `opencode-go/minimax-m3`）。
+常见配对（CLI 自己登录后才有模型）：
 
-## 5. 派工策略（约定）
+| runtime | 说明 |
+|---|---|
+| `opencode` | OpenCode CLI，模型名形如 `provider/model` |
+| `codex` | Codex CLI |
+| `claude` | Claude Code CLI |
+| `antigravity` | Gemini CLI |
+| `kimi` / `qoder` / `grok` / `dsh` / `zcode` / `codebuddy` | 本机对应 CLI |
 
-1. 杂活/批量 → `opencode-go/deepseek-v4-flash`
-2. **大批量/重活且想零成本 → `zen-v4f/deepseek-v4-flash-free`**（Zen 号池免费 204k，opencode 通道，别名 `zen-v4f`）
-3. 难活/质量敏感 → `opencode-go/glm-5.2`
-4. 复杂推理/兜底 → `botcf-claude/claude-opus-5`（claude）或 `gpt-5.6-sol`（codex）
-5. 多模态/图相关/要快 → `gemini-3.6-flash-medium`（antigravity）
-6. 极小任务才用 free 档。
-7. 逆向工程/其它模型拒答的敏感任务 → `grok/grok-4.5`。
-8. 模型超时或服务端错误时 hub 会自动兜底到 `codex/gpt-5.6-sol`，不用自己重试。
+`runtime` 和 `model` 必须配套（`list_runtimes` 里该 runtime 的 models 列表）。配错直接 spawn 失败。
+
+## 5. 派工策略
+
+1. 先打开 dashboard「连接」页，只连接你要用的 CLI。
+2. 用 `list_runtimes` / `recommend_model` 选当前机器上真实存在的模型。
+3. 不要假设任何预置号池、私人 VPS 或多模态网关。
 
 ## 6. 出错自查清单
+
+
 
 | 现象 | 先查 |
 |---|---|
@@ -168,10 +136,10 @@
 ## 7. 验证连通性的最小用例
 
 ```python
-# 通过 SSE 发一个最小任务，30 秒内能返回说明链路全通
+# 先在 dashboard「连接」页连接 opencode，再用 list_runtimes 里真实存在的模型：
 spawn_subagent(
   runtime="opencode",
-  model="opencode-go/deepseek-v4-flash",
+  model="deepseek/deepseek-v4-flash",
   task="用一句话回答：你好",
   workdir=".",
   timeout_sec=60,

@@ -58,11 +58,11 @@ class HubSettings(BaseSettings):
     # ===== BotCF Claude（Claude Code CLI 中转） =====
     # 主通道
     botcf_claude_api_key: str = ""
-    # Claude Code CLI 用 Anthropic SDK，baseURL 不带 /v1；botcf Anthropic 模式为 https://botcf.com
-    botcf_claude_base_url: str = "https://botcf.com"
+    # 可选第三方 Anthropic 兼容中转（发布默认空，由用户自己的 .env 填）
+    botcf_claude_base_url: str = ""
     # 稳定通道（超时兜底）
     botcf_claude_stable_api_key: str = ""
-    botcf_claude_stable_base_url: str = "https://botcf.com"
+    botcf_claude_stable_base_url: str = ""
 
     # ===== OpenAI (Codex) =====
     openai_api_key: str = ""
@@ -113,7 +113,10 @@ class HubSettings(BaseSettings):
     hub_cluster_model: str = ""                # 统一 model，留空 = 用 hub_cluster_model_default
     # 默认走 OpenCode Go 套餐的 deepseek-v4-flash（用户订阅的，量大便宜）
     # fallback 链只在主 model 跑不通时按顺序切
-    hub_cluster_model_default: str = "opencode-go/deepseek-v4-flash"
+    hub_cluster_model_default: str = "deepseek/deepseek-v4-flash"
+    # True（默认）：spawn / 多模态工具必须先在 dashboard「连接」页点过连接。
+    # 测试可设 HUB_REQUIRE_RUNTIME_CONNECTION=false。
+    hub_require_runtime_connection: bool = True
     hub_cluster_fallback_models: str = ""      # JSON 数组，如 '["botcf/deepseek-v4-flash","opencode/deepseek-v4-flash-free"]'
     hub_cluster_topic: str = "cluster.work"    # 集群消费的 topic —— 老的单 pool 配置
     hub_cluster_workdir: str = "."             # worker 的工作目录
@@ -338,24 +341,13 @@ class HubSettings(BaseSettings):
             except (json.JSONDecodeError, TypeError) as e:
                 print(f"[hub] 解析 hub_model_aliases_json 失败: {e}", flush=True)
 
-        # 默认 alias 列表 —— deepseek 优先官方 API（v4-pro 正式版，需 DEEPSEEK_API_KEY），
-        # 其余 alias 优先 OpenCode Go/Zen 套餐（用户订阅）
+        # 发布默认不含任何个人中转/号池。用户自己的 alias 走 HUB_MODEL_ALIASES_JSON。
         return [
             ModelAlias(
                 alias="deepseek",
                 candidates=[
-                    "deepseek/deepseek-v4-pro",          # 官方 API（按量付费，thinking）
-                    "opencode-go/deepseek-v4-pro",       # Go 套餐
-                    "opencode-go/deepseek-v4-flash",     # Go 套餐
-                    "opencode/deepseek-v4-flash-free",   # Zen 免费（极小任务兜底）
-                ],
-            ),
-            ModelAlias(
-                alias="minimax",
-                candidates=[
-                    "opencode-go/minimax-m2.7",         # Go 套餐
-                    "opencode-go/minimax-m3",           # Go 套餐
-                    "opencode/minimax-m2.7",            # Zen 免费
+                    "deepseek/deepseek-v4-pro",
+                    "deepseek/deepseek-v4-flash",
                 ],
             ),
             ModelAlias(
@@ -381,36 +373,14 @@ class HubSettings(BaseSettings):
             ModelAlias(
                 alias="gemini",
                 candidates=[
-                    "antigravity/gemini-3.6-flash-medium",
-                    "antigravity/gemini-3.6-flash-high",
-                    "antigravity/gemini-3.6-flash-low",
-                ],
-            ),
-            ModelAlias(
-                alias="opus",
-                candidates=[
-                    "antigravity/claude-opus-4-6-thinking",
-                    "antigravity/claude-sonnet-4-6",
-                ],
-            ),
-            ModelAlias(
-                alias="glm",
-                candidates=[
-                    "tokenrhythm/glm-5.2",            # 基元律动 37key 轮询
-                    "tokenrhythm/glm-5.1",
-                ],
-            ),
-            ModelAlias(
-                alias="seed",
-                candidates=[
-                    "tokenrhythm/seed-2.1-pro",       # 基元律动（看图✓）
-                    "tokenrhythm/seed-2.1-turbo",     # 基元律动（看图✓）
+                    "gemini-3.8-flash-medium",
+                    "gemini-3.6-flash-medium",
                 ],
             ),
             ModelAlias(
                 alias="dsh",
                 candidates=[
-                    "dsh/deepseek-v4-pro",            # DeepSeek Harness 官方（headless）
+                    "dsh/deepseek-v4-pro",
                     "dsh/deepseek-v4-flash",
                 ],
             ),

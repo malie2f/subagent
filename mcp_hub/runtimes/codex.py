@@ -47,12 +47,17 @@ class CodexAdapter(RuntimeAdapter):
     binary = "codex"
     supports_resume = True
 
-    # GPT-5.6 三档（用户在 botcf 中转站接的）
     _KNOWN_MODELS = [
-        "gpt-5.6-sol",     # 旗舰（贵但最强）
-        "gpt-5.6-terra",   # 均衡（性价比）
-        "gpt-5.6-luna",    # 轻量（高频/分类）
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
     ]
+
+    def login_hint(self) -> str:
+        return "在本机终端运行 `codex login` 后，回到仪表盘点「连接」。"
+
+    def login_command(self) -> list[str] | None:
+        return [self.binary, "login"]
 
     def is_available(self) -> bool:
         return (

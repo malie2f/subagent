@@ -13,11 +13,26 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# 数据
+# 数据（含本机连接登记与密钥，绝不进发布包）
 data/
 logs/
 .mcp-hub/
 *.json.bak
+connections.json
+
+# 本机停放的其它项目 / 逆向产物，不进发布包
+stellar-work/
+valid_*.bin
+dis_*.txt
+ctr_*
+decrypt_log_strings.txt
+manifest_log_strings.txt
+repo_manifest*
+repo_occurrences.txt
+repo_proto_strings.txt
+repo_schema.txt
+image_001.png
+image_001.jpg
 
 # 日志
 *.log

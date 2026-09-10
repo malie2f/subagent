@@ -1,7 +1,7 @@
 [project]
 name = "mcp-hub"
 version = "0.1.0"
-description = "MCP Hub - 让多个 AI 编程工具（Claude Code / Codex / Kimi / OpenCode / MiniMax Code）通过统一协议互相调用、互相派活"
+description = "子智能体 — 本机多 CLI 派活与任务组（MCP 接入名 subagent）"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0",

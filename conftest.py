@@ -1,5 +1,10 @@
 """pytest 全局配置。"""
 
+import os
+
+# 测试不要求 dashboard 连接；产品默认仍是必须连接。
+os.environ.setdefault("HUB_REQUIRE_RUNTIME_CONNECTION", "false")
+
 import pytest
 
 

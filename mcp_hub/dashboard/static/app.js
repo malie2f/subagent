@@ -1,9 +1,11 @@
 // mcp-hub dashboard 前端逻辑
 
-const POLL_MS = 2000;
+const POLL_MS = 8000; // 仅当 SSE 不可用时的后备
 let autoRefresh = true;
 let pollTimer = null;
-let currentTab = 'overview';
+let dashEvents = null; // 看板状态 SSE（有变化才刷）
+let sseFail = 0;
+let currentTab = 'connect';
 let currentSubagent = null;
 let liveEventSource = null;  // 当前正在实时 tail 的 SSE
 let liveStreamTaskId = null; // 当前正在实时看的 task_id
@@ -26,6 +28,52 @@ const dispatchedTasks = [];  // [{task_id, topic, payload, submitted_at}]
 async function fetchJson(url) {
   const r = await fetch(url);
   return await r.json();
+}
+
+/**
+ * 轮询刷新用 Idiomorph（HTMX / Turbo 同款）就地 morph，而不是 innerHTML 整段替换。
+ * innerHTML 会拆掉节点 → 输入框清空、光标丢失、滚动回顶、监听器重复绑定。
+ * ignoreActiveValue + 不改用户正在改的 value，保证打字不被 2s 轮询盖掉。
+ */
+const MORPH_OPTS = {
+  morphStyle: 'innerHTML',
+  ignoreActiveValue: true,
+  restoreFocus: true,
+  callbacks: {
+    beforeAttributeUpdated(attr, node) {
+      if (attr !== 'value' && attr !== 'checked') return;
+      if (node.dataset && node.dataset.live === '1') return;
+      const tag = node.tagName;
+      if (tag === 'TEXTAREA') return false;
+      if (tag === 'INPUT') {
+        const t = (node.type || 'text').toLowerCase();
+        if (t === 'checkbox' || t === 'radio' || t === 'hidden' || t === 'submit' || t === 'button') return;
+        return false;
+      }
+    },
+  },
+};
+
+function setHtml(el, html) {
+  if (!el) return;
+  const htmlStr = html == null ? '' : String(html);
+  const scroll = el.scrollTop;
+  const opts = Object.assign({}, MORPH_OPTS, {
+    callbacks: Object.assign({}, MORPH_OPTS.callbacks, {
+      beforeNodeMorphed(oldNode, newNode) {
+        if (oldNode !== el && oldNode.classList && oldNode.classList.contains('js-keep')) return false;
+        if (MORPH_OPTS.callbacks.beforeNodeMorphed) {
+          return MORPH_OPTS.callbacks.beforeNodeMorphed(oldNode, newNode);
+        }
+      },
+    }),
+  });
+  if (typeof Idiomorph !== 'undefined' && typeof Idiomorph.morph === 'function') {
+    Idiomorph.morph(el, htmlStr, opts);
+  } else {
+    el.innerHTML = htmlStr;
+  }
+  if (el.scrollTop !== scroll) el.scrollTop = scroll;
 }
 
 function escapeHtml(s) {
@@ -164,9 +212,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 document.getElementById('auto-refresh').addEventListener('change', e => {
   autoRefresh = e.target.checked;
-  document.getElementById('auto-refresh-status').textContent = autoRefresh ? '▶ 运行中' : '⏸ 已暂停';
-  if (autoRefresh) startPoll();
-  else stopPoll();
+  if (autoRefresh) startLive();
+  else {
+    stopLive();
+    document.getElementById('auto-refresh-status').textContent = '⏸ 已暂停';
+  }
 });
 
 document.getElementById('refresh-btn').addEventListener('click', () => refresh(true));
@@ -194,9 +244,33 @@ document.getElementById('task-show-archived').addEventListener('change', e => {
   renderTasks();
 });
 
+let pollInFlight = false;
+let pendingRefresh = null; // null=无排队；boolean=排队的 force
+
+function tabNeeds(tab, keys) {
+  if (!keys || !keys.length) return true;
+  const map = {
+    connect: ['connections'],
+    overview: ['connections', 'tasks', 'subagents'],
+    dispatch: ['tasks'],
+    runtimes: ['connections'],
+    subagents: ['subagents', 'tasks'],
+    cluster: ['crews', 'tasks', 'subagents'],
+    crew: ['crews', 'subagents'],
+    tasks: ['tasks', 'subagents'],
+    usage: [],
+  };
+  const need = map[tab];
+  if (!need) return true;
+  if (!need.length) return false;
+  return keys.some(k => need.indexOf(k) !== -1);
+}
+
 function startPoll() {
   stopPoll();
-  pollTimer = setInterval(refresh, POLL_MS);
+  pollTimer = setInterval(() => { refresh(false); }, POLL_MS);
+  const st = document.getElementById('auto-refresh-status');
+  if (st && autoRefresh) st.textContent = '▶ 轮询后备';
 }
 
 function stopPoll() {
@@ -204,18 +278,72 @@ function stopPoll() {
   pollTimer = null;
 }
 
-function refresh(force) {
-  switch (currentTab) {
-    case 'overview':  renderOverview(); break;
-    case 'dispatch':  renderDispatch(); break;
-    case 'runtimes':  renderRuntimes(); break;
-    case 'subagents': renderSubagents(); break;
-    case 'cluster':   renderCluster(); break;
-    case 'tasks':     renderTasks(); break;
-    case 'usage':     renderUsage(force === true); break;
-    case 'risk':      renderRisk(force === true); break;
+function stopLive() {
+  if (dashEvents) {
+    dashEvents.close();
+    dashEvents = null;
   }
-  document.getElementById('last-update').textContent = '更新于 ' + fmtTime(Date.now() / 1000);
+  stopPoll();
+}
+
+function startLive() {
+  stopLive();
+  if (!autoRefresh) return;
+  if (typeof EventSource === 'undefined') {
+    startPoll();
+    return;
+  }
+  const es = new EventSource('/api/events');
+  dashEvents = es;
+  es.addEventListener('hello', () => {
+    sseFail = 0;
+    stopPoll();
+    const st = document.getElementById('auto-refresh-status');
+    if (st) st.textContent = '▶ 推送中';
+    refresh(true);
+  });
+  es.addEventListener('dirty', (ev) => {
+    if (document.hidden) return;
+    let keys = [];
+    try { keys = (JSON.parse(ev.data) || {}).keys || []; } catch (e) { keys = []; }
+    if (tabNeeds(currentTab, keys)) refresh(true);
+  });
+  es.onerror = () => {
+    sseFail += 1;
+    if (sseFail >= 3 && autoRefresh && !pollTimer) startPoll();
+  };
+}
+
+async function refresh(force) {
+  const wantForce = force === true;
+  if (pollInFlight) {
+    pendingRefresh = wantForce || pendingRefresh === true;
+    return;
+  }
+  pollInFlight = true;
+  try {
+    let runForce = wantForce;
+    for (;;) {
+      const tab = currentTab;
+      switch (tab) {
+        case 'overview':  await renderOverview(); break;
+        case 'dispatch':  await renderDispatch(); break;
+        case 'runtimes':  await renderRuntimes(); break;
+        case 'subagents': await renderSubagents(); break;
+        case 'cluster':   await renderCluster(); break;
+        case 'tasks':     await renderTasks(); break;
+        case 'usage':     await renderUsage(runForce); break;
+        case 'connect':   await renderConnect(runForce); break;
+        case 'crew':      await renderCrew(); break;
+      }
+      document.getElementById('last-update').textContent = '更新于 ' + fmtTime(Date.now() / 1000);
+      if (pendingRefresh === null) break;
+      runForce = pendingRefresh === true;
+      pendingRefresh = null;
+    }
+  } finally {
+    pollInFlight = false;
+  }
 }
 
 // 全局缓存 models（派活 tab 用）
@@ -227,6 +355,9 @@ let dispatchFormRendered = false;
 // 暴露给 inline onclick
 window.toggleTaskDetail = toggleTaskDetail;
 window.submitVerify = submitVerify;
+window.selectCrew = selectCrew;
+window.selectCrewMember = selectCrewMember;
+window.crewSupervise = crewSupervise;
 window.openSubagentTranscript = openSubagentTranscript;
 
 // ---------- 实时日志流（SSE） ----------
@@ -479,44 +610,44 @@ async function renderOverview() {
 
   document.getElementById('runtime-count').textContent = o.runtimes.count;
   const rl = document.getElementById('runtime-list');
-  rl.innerHTML = o.runtimes.items.map(r => `
-    <div class="runtime-item">
+  setHtml(rl, o.runtimes.items.map(r => `
+    <div class="runtime-item" id="ov-rt-${escapeHtml(r.name)}">
       <span class="dot ${r.available ? 'green' : 'red'}"></span>
       <span class="runtime-name">${escapeHtml(r.name)}</span>
       <span class="runtime-models">${r.models.length ? r.models.slice(0, 3).join(', ') + (r.models.length > 3 ? '…' : '') : '(stub)'}</span>
     </div>
-  `).join('') || '<div class="muted">无运行时</div>';
+  `).join('') || '<div class="muted">无运行时</div>');
 
   document.getElementById('tool-count').textContent = o.tools.count;
   const tl = document.getElementById('tool-list');
-  tl.innerHTML = o.tools.items.map(t => `
-    <div class="tool-item">
+  setHtml(tl, o.tools.items.map(t => `
+    <div class="tool-item" id="ov-tool-${escapeHtml(t.name)}">
       <span class="dot ${t.available ? 'green' : 'red'}"></span>
       <span class="tool-name">${escapeHtml(t.name)}</span>
       <span class="tool-ops">${(t.operations || []).slice(0, 4).join(', ')}</span>
     </div>
-  `).join('') || '<div class="muted">无工具</div>';
+  `).join('') || '<div class="muted">无工具</div>');
 
   const cfg = o.config;
-  document.getElementById('cluster-summary').innerHTML = `
+  setHtml(document.getElementById('cluster-summary'), `
     <table class="detail-table">
-      <tr><td>状态</td><td>${cfg.cluster_enabled ? `<span class="dot green"></span> 已开启` : `<span class="dot gray"></span> 已关闭`}</td></tr>
+      <tr><td>状态</td><td>${cfg.cluster_enabled ? `<span class="dot green"></span> 已开启` : `<span class="dot gray"></span> 已关闭（无 worker，派活不会被认领）`}</td></tr>
       <tr><td>数量</td><td>${cfg.cluster_size || 0}</td></tr>
       <tr><td>模型</td><td>${escapeHtml(cfg.cluster_model)}</td></tr>
       <tr><td>主题</td><td>${escapeHtml(cfg.cluster_topic)}</td></tr>
       <tr><td>队列</td><td>${escapeHtml(cfg.queue_path)}</td></tr>
     </table>
-  `;
+  `);
 
   const q = o.queue;
   const s = q.stats || {};
-  document.getElementById('queue-summary').innerHTML = `
+  setHtml(document.getElementById('queue-summary'), `
     <table class="detail-table">
       <tr><td>总数</td><td>${s.total || 0}</td></tr>
       ${Object.entries(s.by_status || {}).map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}
       <tr><td>主题数</td><td>${(q.topics || []).length}</td></tr>
     </table>
-  `;
+  `);
 }
 
 // ---------- Runtimes ----------
@@ -524,8 +655,8 @@ async function renderOverview() {
 async function renderRuntimes() {
   const r = await fetchJson('/api/runtimes');
   const el = document.getElementById('runtime-detail');
-  el.innerHTML = r.items.map(rt => `
-    <div class="card" style="margin-bottom: 12px">
+  setHtml(el, r.items.map(rt => `
+    <div class="card" id="rt-${escapeHtml(rt.name)}" style="margin-bottom: 12px">
       <h2>
         <span class="dot ${rt.available ? 'green' : 'red'}"></span>
         ${escapeHtml(rt.name)}
@@ -534,7 +665,7 @@ async function renderRuntimes() {
       ${rt.status ? `<div class="muted" style="margin-bottom: 8px">状态: ${escapeHtml(rt.status)} · ${escapeHtml(rt.note || '')}</div>` : ''}
       <div class="muted" style="font-size: 12px">${rt.models.length ? rt.models.map(m => `<span style="background: var(--border-dim); padding: 1px 6px; margin-right: 4px; display: inline-block; margin-bottom: 4px">${escapeHtml(m)}</span>`).join('') : '（占位，无可用模型）'}</div>
     </div>
-  `).join('') || '<div class="muted">无运行时</div>';
+  `).join('') || '<div class="muted">无运行时</div>');
 }
 
 // ---------- Transcript 渲染 ----------
@@ -725,7 +856,7 @@ async function renderSubagents() {
   const list = document.getElementById('subagent-list');
 
   if (!r.subagents.length) {
-    list.innerHTML = `<div class="muted">${showArchivedSubagents ? '暂无子 Agent' : '暂无活跃子 Agent（已封存 ' + (r.archived_count || 0) + ' 个）'}</div>`;
+    setHtml(list, `<div class="muted">${showArchivedSubagents ? '暂无子 Agent' : '暂无活跃子 Agent（已封存 ' + (r.archived_count || 0) + ' 个）'}</div>`);
     if (currentSubagent) {
       currentSubagent = null;
       document.getElementById('subagent-detail').innerHTML = '<p class="muted">选左侧一项查看详情</p>';
@@ -733,10 +864,10 @@ async function renderSubagents() {
     return;
   }
 
-  list.innerHTML = r.subagents.map(s => {
+  setHtml(list, r.subagents.map(s => {
     const isRunning = ['running', 'claimed', 'pending'].includes(s.status);
     return `
-    <div class="subagent-item ${currentSubagent === s.task_id ? 'active' : ''} ${s.status === 'verifying' ? 'task-verify' : ''}" data-tid="${escapeHtml(s.task_id)}">
+    <div class="subagent-item ${currentSubagent === s.task_id ? 'active' : ''} ${s.status === 'verifying' ? 'task-verify' : ''}" id="sa-${escapeHtml(s.task_id)}" data-tid="${escapeHtml(s.task_id)}">
       <div class="row1">
         <span class="title" title="${escapeHtml(s.payload || '')}">${escapeHtml(makeTaskTitle(s.from_model, s.created_at, s.payload))}</span>
         <span class="task-status ${escapeHtml(s.status || 'unknown')}">${escapeHtml(s.status || '-')}</span>
@@ -756,16 +887,7 @@ async function renderSubagents() {
       ${s.result_preview ? `<div class="payload">${escapeHtml(s.result_preview.slice(0, 120))}</div>` : ''}
     </div>
   `;
-  }).join('');
-
-  list.querySelectorAll('.subagent-item').forEach(el => {
-    el.addEventListener('click', () => {
-      currentSubagent = el.dataset.tid;
-      list.querySelectorAll('.subagent-item').forEach(e => e.classList.remove('active'));
-      el.classList.add('active');
-      showSubagentDetail(currentSubagent);
-    });
-  });
+  }).join(''));
 
   // 如果当前有打开详情的 task，只轻量更新列表里的状态高亮，
   // 不要重刷详情面板：实时日志面板靠 SSE 自己推，重刷会打断滚动。
@@ -1146,14 +1268,26 @@ async function showSubagentDetail(tid) {
 // ---------- Cluster ----------
 
 async function renderCluster() {
-  const c = await fetchJson('/api/cluster');
+  const [c, crewsResp] = await Promise.all([
+    fetchJson('/api/cluster'),
+    fetchJson('/api/crews'),
+  ]);
   const el = document.getElementById('cluster-detail');
+  const crews = (crewsResp && crewsResp.crews) || [];
+
   if (!c.enabled) {
-    el.innerHTML = `<div class="card"><h2>集群未启用</h2><p class="muted">${c.note || ''}</p></div>`;
+    setHtml(el, `
+      <div class="card">
+        <h2>不预挂工人</h2>
+        <p class="cluster-banner">${escapeHtml(c.note || '模型由调用方指定，不写死任何厂商。')}</p>
+        <p class="muted">任务组/派活时自己选已连接的 runtime 和 model。mimo 只是一种可接入的模型，不是集群本体。交流和监督在「监督」或下面的关系图。</p>
+      </div>
+      ${await renderClusterCrewCard(crews)}
+    `);
+    bindCrewStage(el);
     return;
   }
 
-  // 多 pool 渲染
   const pools = c.pools || [];
   const totalSize = pools.reduce((sum, p) => sum + (p.size || 0), 0);
   const totalPending = (c.totals && c.totals.pending) || 0;
@@ -1161,32 +1295,46 @@ async function renderCluster() {
   const totalDone = (c.totals && c.totals.done) || 0;
   const totalFailed = (c.totals && c.totals.failed) || 0;
 
-  const poolsHtml = pools.map(p => `
+  const poolsHtml = pools.map(p => {
+    const slots = [];
+    const n = Math.max(1, p.size || 1);
+    for (let i = 0; i < n; i++) {
+      slots.push(`<div class="cluster-slot"><div class="nm">工人 ${i + 1}</div><div class="muted">${escapeHtml(p.runtime)} / ${escapeHtml(p.model)}</div></div>`);
+    }
+    return `
     <div class="card" style="margin-bottom: 12px">
       <h2>
         <span class="pool-name">${escapeHtml(p.name)}</span>
         <span class="pool-tag" style="font-size: 12px; color: var(--gray2); margin-left: 8px">
-          ${p.enabled ? '✓ 启用' : '× 禁用'} · size=${p.size} · runtime=${escapeHtml(p.runtime)} · model=${escapeHtml(p.model)}
+          ${p.enabled ? '✓ 启用' : '× 禁用'} · ${n} 工人 · ${escapeHtml(p.topic)}
         </span>
       </h2>
-      <table class="detail-table">
-        <tr><td>主题</td><td><code>${escapeHtml(p.topic)}</code></td></tr>
-        <tr><td>工作目录</td><td>${escapeHtml(p.workdir)}</td></tr>
-        <tr><td>每 worker 并发数</td><td>${p.concurrency_per_worker}</td></tr>
-        <tr><td>任务超时</td><td>${p.task_timeout_sec}秒</td></tr>
-      </table>
-      <div class="cluster-stat" style="margin-top: 8px">
-        <div class="stat"><div class="num" style="color: var(--warn)">${p.queue.pending}</div><div class="label">待处理</div></div>
-        <div class="stat"><div class="num" style="color: var(--accent-btn)">${p.queue.claimed}</div><div class="label">认领中</div></div>
-        <div class="stat"><div class="num" style="color: var(--ok)">${p.queue.done}</div><div class="label">已完成</div></div>
-        <div class="stat"><div class="num" style="color: var(--err)">${p.queue.failed}</div><div class="label">失败</div></div>
+      <div class="cluster-flow">
+        <div class="cluster-col">
+          <h3>排队 ${p.queue.pending}</h3>
+          <p class="muted">topic 里还没人领的活</p>
+        </div>
+        <div class="cluster-col">
+          <h3>工人认领 ${p.queue.claimed}</h3>
+          ${slots.join('')}
+        </div>
+        <div class="cluster-col">
+          <h3>出活</h3>
+          <div class="cluster-slot"><div class="nm" style="color:var(--ok)">完成 ${p.queue.done}</div></div>
+          <div class="cluster-slot"><div class="nm" style="color:var(--err)">失败 ${p.queue.failed}</div></div>
+        </div>
       </div>
-    </div>
-  `).join('');
+      <table class="detail-table">
+        <tr><td>工作目录</td><td>${escapeHtml(p.workdir)}</td></tr>
+        <tr><td>超时</td><td>${p.task_timeout_sec}秒 · 每工人并发 ${p.concurrency_per_worker}</td></tr>
+      </table>
+    </div>`;
+  }).join('');
 
-  el.innerHTML = `
+  setHtml(el, `
     <div class="card">
-      <h2>总览（${pools.length} 个 pool，共 ${totalSize} 个 worker）</h2>
+      <h2>工人池（${pools.length} 组，共 ${totalSize} 个工人）</h2>
+      <p class="cluster-banner">可选的本机队列。每组工人的 runtime/model 是你配的，不是产品内置。各领各的活，<b>互相不说话</b>。交流在任务组黑板。</p>
       <div class="cluster-stat">
         <div class="stat"><div class="num" style="color: var(--warn)">${totalPending}</div><div class="label">待处理</div></div>
         <div class="stat"><div class="num" style="color: var(--accent-btn)">${totalClaimed}</div><div class="label">认领中</div></div>
@@ -1195,15 +1343,44 @@ async function renderCluster() {
       </div>
     </div>
     ${poolsHtml}
+    ${await renderClusterCrewCard(crews)}
     <div class="card" style="margin-top: 12px">
       <h2>说明</h2>
       <p class="muted">${c.note || ''}</p>
-      <p class="muted" style="margin-top: 8px">
-        多 pool 路由：dashboard 派活选 model 时，自动按 <code>for_model = runtime/model</code> 路由到对应 pool 的 topic。
-        例：选 <code>codex</code> runtime + <code>gpt-5.6-terra</code> model → 派到 <code>cluster.work.codex</code>。
-      </p>
     </div>
-  `;
+  `);
+  bindCrewStage(el);
+}
+
+async function renderClusterCrewCard(crews) {
+  if (!crews.length) {
+    return `<div class="card" style="margin-top:12px">
+      <h2>任务组（交流 + 监督）</h2>
+      <p class="muted">还没有任务组。到「监督」建一个，成员会经黑板互相留言，监督者解卡/纠偏会出现在关系图上。</p>
+    </div>`;
+  }
+  if (!currentCrewId || !crews.some(c => c.crew_id === currentCrewId)) {
+    currentCrewId = crews[0].crew_id;
+  }
+  const d = await fetchJson('/api/crews/' + encodeURIComponent(currentCrewId));
+  if (!d.ok) {
+    return `<div class="card" style="margin-top:12px"><h2>任务组</h2><p class="muted">${escapeHtml(d.error || '')}</p></div>`;
+  }
+  const picker = crews.map(c => {
+    const sel = c.crew_id === currentCrewId ? ' selected' : '';
+    return `<option value="${escapeHtml(c.crew_id)}"${sel}>${escapeHtml((c.goal || '').slice(0, 60))}</option>`;
+  }).join('');
+  return `<div class="card" style="margin-top:12px">
+    <h2>任务组（交流 + 监督）</h2>
+    <label class="form-label">当前任务组</label>
+    <select id="cluster-crew-pick" class="form-input cluster-crew-pick" style="width:100%;margin:6px 0 10px">${picker}</select>
+    ${crewRelationHtml(d.crew, { includeForm: false, pfx: 'cl' })}
+  </div>`;
+}
+
+function bindCrewStage(root) {
+  const stage = root.querySelector('.crew-stage');
+  if (stage) bindCrewRelation(stage, currentCrewId);
 }
 
 // ---------- Usage ----------
@@ -1221,7 +1398,7 @@ async function renderUsage(force = false) {
   const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const today = (u.by_day || {})[todayKey] || { tokens: {}, cost: 0, tasks: 0 };
 
-  document.getElementById('usage-stats').innerHTML = `
+  setHtml(document.getElementById('usage-stats'), `
     <div class="cluster-stat" style="margin-bottom: 8px">
       <div class="stat"><div class="num">${fmtTokens((today.tokens || {}).total)}</div><div class="label">今日 token（${today.tasks || 0} 任务）</div></div>
       <div class="stat"><div class="num" style="color: var(--warn)">${fmtCost(today.cost)}</div><div class="label">今日 cost</div></div>
@@ -1233,12 +1410,12 @@ async function renderUsage(force = false) {
       有 usage 数据的任务 ${u.tasks_with_usage || 0} / ${u.tasks_total || 0}
       （${u.tasks_without_usage || 0} 个任务的 runtime 不上报 token，不计入）
     </p>
-  `;
+  `);
 
   // 按模型排行：横向条形（纯 CSS）
   const rows = u.by_model || [];
   const maxTok = Math.max(1, ...rows.map(r => (r.tokens || {}).total || 0));
-  document.getElementById('usage-by-model').innerHTML = rows.map(r => {
+  setHtml(document.getElementById('usage-by-model'), rows.map(r => {
     const tk = r.tokens || {};
     const cache = tk.cache || {};
     const tok = tk.total || 0;
@@ -1253,14 +1430,14 @@ async function renderUsage(force = false) {
         <span class="muted">${r.tasks} 任务</span>
       </div>
     `;
-  }).join('') || '<div class="muted">无数据</div>';
+  }).join('') || '<div class="muted">无数据</div>');
 
   // 按天：最近 14 天，绿色小条形
   const days = Object.entries(u.by_day || {})
     .sort((a, b) => b[0].localeCompare(a[0]))
     .slice(0, 14);
   const maxDay = Math.max(1, ...days.map(([, v]) => (v.tokens || {}).total || 0));
-  document.getElementById('usage-by-day').innerHTML = days.map(([day, v]) => {
+  setHtml(document.getElementById('usage-by-day'), days.map(([day, v]) => {
     const tok = (v.tokens || {}).total || 0;
     const pct = Math.max(tok > 0 ? 1 : 0, (tok / maxDay) * 100);
     return `
@@ -1272,91 +1449,128 @@ async function renderUsage(force = false) {
         <span class="muted">${v.tasks} 任务</span>
       </div>
     `;
-  }).join('') || '<div class="muted">无数据</div>';
+  }).join('') || '<div class="muted">无数据</div>');
 }
 
-// ---------- 风控 tab（调用热力图 + 账号风控表） ----------
+// ---------- 连接 tab ----------
 
-let riskLastFetch = 0;
+let connectLastFetch = 0;
+let connectBusy = false;
 
-// 风控里的"最近调用/最近死亡"可能跨天：显示 月-日 时:分
-function fmtDayTime(ts) {
-  if (!ts) return '-';
-  const d = new Date(ts * 1000);
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-async function renderRisk(force = false) {
-  // 15s 节流：registry 近千条，2s 轮询每次都聚合太贵
+async function renderConnect(force = false) {
+  if (connectBusy && !force) return;
   const now = Date.now();
-  if (!force && riskLastFetch && now - riskLastFetch < 15000) return;
-  riskLastFetch = now;
-
-  const d = await fetchJson('/api/risk');
+  if (!force && connectLastFetch && now - connectLastFetch < 8000) return;
+  if (connectBusy) return;
+  connectLastFetch = now;
+  const d = await fetchJson('/api/connections');
   if (!d || !d.ok) return;
 
-  // 全局条
-  const g = d.global || {};
-  document.getElementById('risk-global').innerHTML = `
-    <div class="cluster-stat">
-      <div class="stat"><div class="num" style="color: var(--ok-bright)">${g.running || 0}</div><div class="label">当前在飞（全局上限 ${g.limit || '不限'}）</div></div>
-    </div>
-    <p class="muted" style="font-size: 11px">每 15s 自动刷新 · 更新于 ${fmtTime(now / 1000)} · 数据源：subagents_registry（${d.records || 0} 条）</p>
-  `;
+  const rtEl = document.getElementById('connect-runtimes');
+  setHtml(rtEl, (d.runtimes || []).map(r => {
+    const st = r.connected ? '已连接' : (r.ready ? '已就绪，未连接' : (r.installed ? '已安装，需登录' : '未安装'));
+    const dot = r.connected ? 'green' : (r.ready ? 'gray' : 'red');
+    const loginBtn = r.has_login_command && !r.connected
+      ? `<button class="btn conn-login" data-name="${escapeHtml(r.name)}">打开登录窗口</button>`
+      : '';
+    const action = r.connected
+      ? `<button class="btn danger-btn conn-rt-off" data-name="${escapeHtml(r.name)}">断开</button>`
+      : `<button class="btn-primary conn-rt-on" data-name="${escapeHtml(r.name)}" ${r.installed ? '' : 'disabled'}>连接</button>`;
+    return `<div class="connect-row" id="conn-rt-${escapeHtml(r.name)}">
+      <span class="dot ${dot}"></span>
+      <div class="connect-main">
+        <div><strong>${escapeHtml(r.name)}</strong> <span class="muted">${escapeHtml(r.binary || '')}</span></div>
+        <div class="muted" style="font-size:11px">${escapeHtml(st)} · ${escapeHtml(r.login_hint || '')}</div>
+      </div>
+      <div class="connect-actions">${loginBtn}${action}</div>
+    </div>`;
+  }).join('') || '<div class="muted">无 runtime</div>');
 
-  // 热力图：行=model（24h 调用 top10），列=小时，颜色深度=次数
-  const hm = d.heatmap || { hours: [], rows: [], max: 0 };
-  const hmax = Math.max(1, hm.max || 1);
-  let html = '';
-  if (hm.rows.length) {
-    html = '<table class="heat-table"><thead><tr><th style="text-align:left">model \\ 时</th>';
-    hm.hours.forEach((h, i) => { html += i % 2 === 0 ? `<th>${h}</th>` : '<th></th>'; });
-    html += '<th>Σ</th></tr></thead><tbody>';
-    hm.rows.forEach(r => {
-      html += `<tr><td class="heat-name" title="${escapeHtml(r.model)}">${escapeHtml(r.model)}</td>`;
-      r.cells.forEach((c, i) => {
-        const bg = c ? `background: rgba(31, 111, 235, ${(0.15 + 0.85 * c / hmax).toFixed(2)})` : '';
-        const fg = c && c / hmax > 0.55 ? '; color: #fff' : '';
-        const tip = `${r.model} · ${hm.hours[i]} · ${c} 次`;
-        html += `<td class="heat-cell" style="${bg}${fg}" title="${escapeHtml(tip)}">${c || ''}</td>`;
-      });
-      html += `<td class="heat-total">${r.total}</td></tr>`;
-    });
-    html += '</tbody></table>';
-  } else {
-    html = '<p class="muted">近 24 小时没有调用记录</p>';
-  }
-  document.getElementById('risk-heatmap').innerHTML = html;
-
-  // 账号风控表
-  const rows = d.accounts || [];
-  let t = '<table class="risk-table"><thead><tr>' +
-    '<th>账号</th><th>档位</th><th>建议并发</th><th>在飞</th><th>24h</th><th>7d</th><th>总量</th>' +
-    '<th>成功率</th><th>429/限流</th><th>均时长</th><th>最近调用</th><th>最近死亡</th><th>主力模型</th>' +
-    '</tr></thead><tbody>';
-  rows.forEach(a => {
-    const rate = a.success_rate == null ? '-' : a.success_rate + '%';
-    const rateStyle = a.success_rate != null && a.success_rate < 90 ? ' style="color: var(--err)"' : '';
-    const thr = a.throttle_hits > 0 ? `<span style="color: var(--err); font-weight: 600">${a.throttle_hits}</span>` : '0';
-    const run = a.running > 0 ? `<span style="color: var(--ok-bright); font-weight: 600">${a.running}</span>` : '0';
-    const over = a.suggested_concurrency && a.running > a.suggested_concurrency;
-    t += `<tr${over ? ' class="risk-over"' : ''}>` +
-      `<td>${escapeHtml(a.account)}</td>` +
-      `<td>${escapeHtml(a.tier)}</td>` +
-      `<td>${a.suggested_concurrency}</td>` +
-      `<td>${run}</td>` +
-      `<td>${a.calls_24h}</td><td>${a.calls_7d}</td><td>${a.total}</td>` +
-      `<td${rateStyle}>${rate}</td>` +
-      `<td>${thr}</td>` +
-      `<td>${fmtDuration(a.avg_duration_sec)}</td>` +
-      `<td>${fmtDayTime(a.last_call_at)}</td>` +
-      `<td>${a.last_dead_at ? fmtDayTime(a.last_dead_at) : '-'}</td>` +
-      `<td class="muted" style="font-size: 11px">${escapeHtml((a.top_models || []).join(', '))}</td>` +
-      '</tr>';
-  });
-  t += '</tbody></table>';
-  document.getElementById('risk-accounts').innerHTML = t;
+  const toolEl = document.getElementById('connect-tools');
+  setHtml(toolEl, (d.tools || []).map(t => {
+    const connected = t.connected;
+    const isHedge = t.name === 'hedge';
+    return `<div class="connect-tool" id="conn-tool-${escapeHtml(t.name)}">
+      <div class="connect-row" style="border-bottom:none">
+        <span class="dot ${connected ? 'green' : 'gray'}"></span>
+        <div class="connect-main">
+          <div><strong>${escapeHtml(t.name)}</strong> ${connected ? '<span class="muted">已连接</span>' : ''}</div>
+          <div class="muted" style="font-size:11px">${escapeHtml(t.hint || '')}</div>
+        </div>
+      </div>
+      <div class="connect-form">
+        ${isHedge ? `<label class="form-label">Base URL</label>
+          <input class="form-input conn-base" id="conn-base-${escapeHtml(t.name)}" data-name="${escapeHtml(t.name)}" value="${escapeHtml(t.base_url || '')}" placeholder="https://example.com/v1">` : ''}
+        <label class="form-label">API Key（不会显示已保存的值）</label>
+        <input class="form-input conn-key" id="conn-key-${escapeHtml(t.name)}" data-name="${escapeHtml(t.name)}" type="password" autocomplete="off" placeholder="${t.has_api_key ? '已保存，留空则保持' : '可选'}">
+        ${t.name === 'mmx' ? `<label class="form-label">Region</label>
+          <input class="form-input conn-region" id="conn-region-${escapeHtml(t.name)}" data-name="${escapeHtml(t.name)}" value="${escapeHtml(t.region || '')}" placeholder="cn 或 global">` : ''}
+        <div class="connect-actions" style="margin-top:8px">
+          <button class="btn-primary conn-tool-on" data-name="${escapeHtml(t.name)}">连接</button>
+          ${connected ? `<button class="btn danger-btn conn-tool-off" data-name="${escapeHtml(t.name)}">断开</button>` : ''}
+        </div>
+        <div class="muted conn-msg" data-name="${escapeHtml(t.name)}" style="font-size:11px;margin-top:4px"></div>
+      </div>
+    </div>`;
+  }).join(''));
 }
+
+document.getElementById('tab-connect').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button');
+  if (!btn) return;
+  const name = btn.dataset.name;
+  if (!name) return;
+  if (connectBusy) return;
+  connectBusy = true;
+  btn.disabled = true;
+  const oldLabel = btn.textContent;
+  btn.textContent = '处理中…';
+  try {
+    if (btn.classList.contains('conn-rt-on')) {
+      const r = await fetch(`/api/connections/runtimes/${encodeURIComponent(name)}/connect`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      const d = await r.json();
+      if (!d.ok) alert(d.error || '连接失败');
+    } else if (btn.classList.contains('conn-login')) {
+      const r = await fetch(`/api/connections/runtimes/${encodeURIComponent(name)}/connect`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ open_login: true }),
+      });
+      const d = await r.json();
+      if (!d.ok && d.error) alert(d.error);
+    } else if (btn.classList.contains('conn-rt-off')) {
+      await fetch(`/api/connections/runtimes/${encodeURIComponent(name)}/disconnect`, { method: 'POST' });
+    } else if (btn.classList.contains('conn-tool-on')) {
+      const box = btn.closest('.connect-tool');
+      const body = {
+        base_url: (box.querySelector('.conn-base') || {}).value || '',
+        api_key: (box.querySelector('.conn-key') || {}).value || '',
+        region: (box.querySelector('.conn-region') || {}).value || '',
+      };
+      const r = await fetch(`/api/connections/tools/${encodeURIComponent(name)}/connect`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      const msg = box.querySelector('.conn-msg');
+      if (msg) msg.textContent = d.ok ? '已连接' : (d.error || '失败');
+      if (!d.ok) alert(d.error || '连接失败');
+    } else if (btn.classList.contains('conn-tool-off')) {
+      await fetch(`/api/connections/tools/${encodeURIComponent(name)}/disconnect`, { method: 'POST' });
+    } else {
+      return;
+    }
+    connectLastFetch = 0;
+    await renderConnect(true);
+  } catch (e) {
+    btn.textContent = oldLabel;
+    btn.disabled = false;
+    alert('异常: ' + e.message);
+  } finally {
+    connectBusy = false;
+  }
+});
 
 // ---------- Dispatch tab ----------
 
@@ -1514,28 +1728,22 @@ async function renderModelWall() {
     </div>
   `).join('');
 
-  el.innerHTML = html || '<div class="muted">没有可用模型</div>';
-
-  // 绑定每张卡的派发按钮
-  el.querySelectorAll('.model-card').forEach(card => {
-    const submitBtn = card.querySelector('.card-submit');
-    submitBtn.addEventListener('click', () => submitFromCard(card));
-  });
+  setHtml(el, html || '<div class="muted">没有可用模型</div>');
 }
 
 function renderModelCard(m) {
   const id = `mc-${m.runtime}-${m.name}`.replace(/[^a-zA-Z0-9]/g, '_');
   const dotClass = m.available ? 'green' : 'red';
   return `
-    <div class="model-card" data-runtime="${escapeHtml(m.runtime)}" data-model="${escapeHtml(m.name)}" data-available="${m.available}">
+    <div class="model-card" id="${escapeHtml(id)}" data-runtime="${escapeHtml(m.runtime)}" data-model="${escapeHtml(m.name)}" data-available="${m.available}">
       <div class="card-header">
         <span class="dot ${dotClass}"></span>
         <span class="card-model-name" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
       </div>
       <div class="card-runtime">${escapeHtml(m.runtime)}</div>
-      <textarea class="card-payload" placeholder="任务内容..."></textarea>
+      <textarea class="card-payload" id="${escapeHtml(id)}-payload" placeholder="任务内容..."></textarea>
       <div class="card-actions">
-        <input type="text" class="card-topic" value="${m.runtime}.work" title="topic（默认 runtime.work）">
+        <input type="text" class="card-topic" id="${escapeHtml(id)}-topic" value="${m.runtime}.work" title="topic（默认 runtime.work）">
         <button class="card-submit" ${m.available ? '' : 'disabled'}>派发</button>
       </div>
       <div class="card-status"></div>
@@ -1644,11 +1852,11 @@ async function renderDispatchList() {
 
   const el = document.getElementById('dispatch-list');
   if (!dispatchedTasks.length) {
-    el.innerHTML = '<div class="muted">还没派过任务。在上方选 model 填任务内容点"派发"。</div>';
+    setHtml(el, '<div class="muted">还没派过任务。在上方选 model 填任务内容点"派发"。</div>');
     return;
   }
 
-  el.innerHTML = dispatchedTasks.map(t => {
+  setHtml(el, dispatchedTasks.map(t => {
     const resultClass = t.status === 'done' ? '' : (t.status === 'failed' ? 'failed' : 'pending');
     const resultText = t.status === 'done'
       ? t.result
@@ -1656,7 +1864,7 @@ async function renderDispatchList() {
         ? `错误: ${t.error || '(unknown)'}`
         : (t.status === 'claimed' ? `认领中 by ${t.claimed_by || '?'}...` : '等待 worker 认领...');
     return `
-      <div class="dispatch-item">
+      <div class="dispatch-item" id="disp-${escapeHtml(t.task_id)}">
         <div class="row1">
           <span class="tid" data-tid="${escapeHtml(t.task_id)}">${escapeHtml(t.task_id)}</span>
           <span class="task-status ${escapeHtml(t.status)}">${escapeHtml(t.status)}</span>
@@ -1668,30 +1876,26 @@ async function renderDispatchList() {
         <div class="result ${resultClass}">${escapeHtml(resultText || '')}</div>
       </div>
     `;
-  }).join('');
+  }).join(''));
+}
 
-  // 点 task_id → 跳到子 Agent tab 看完整日志
-  el.querySelectorAll('.tid').forEach(el => {
-    el.addEventListener('click', () => {
-      const tid = el.dataset.tid;
-      currentSubagent = tid;
-      currentTab = 'subagents';
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab').forEach(t => t.classList.add('hidden'));
-      document.querySelector('.tab-btn[data-tab="subagents"]').classList.add('active');
-      document.getElementById('tab-subagents').classList.remove('hidden');
-      renderSubagents();
-      setTimeout(() => {
-        document.querySelectorAll('.subagent-item').forEach(e => e.classList.remove('active'));
-        const li = document.querySelector(`.subagent-item[data-tid="${CSS.escape(tid)}"]`);
-        if (li) {
-          li.classList.add('active');
-          li.scrollIntoView({ block: 'nearest' });
-        }
-        showSubagentDetail(tid);
-      }, 500);
-    });
-  });
+function openSubagentFromDispatch(tid) {
+  currentSubagent = tid;
+  currentTab = 'subagents';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.add('hidden'));
+  document.querySelector('.tab-btn[data-tab="subagents"]').classList.add('active');
+  document.getElementById('tab-subagents').classList.remove('hidden');
+  renderSubagents();
+  setTimeout(() => {
+    document.querySelectorAll('.subagent-item').forEach(e => e.classList.remove('active'));
+    const li = document.querySelector(`.subagent-item[data-tid="${CSS.escape(tid)}"]`);
+    if (li) {
+      li.classList.add('active');
+      li.scrollIntoView({ block: 'nearest' });
+    }
+    showSubagentDetail(tid);
+  }, 500);
 }
 
 let currentTaskDetail = null;
@@ -1713,7 +1917,7 @@ async function renderTasks() {
   document.getElementById('task-archived-count').textContent = r.archived_count || 0;
   const el = document.getElementById('task-list');
   if (!r.tasks.length) {
-    el.innerHTML = `<div class="muted">${showArchivedTasks ? '无任务' : '无活跃任务（已封存 ' + (r.archived_count || 0) + ' 个）'}</div>`;
+    setHtml(el, `<div class="muted">${showArchivedTasks ? '无任务' : '无活跃任务（已封存 ' + (r.archived_count || 0) + ' 个）'}</div>`);
     return;
   }
   // 详情面板里盯着的任务刚结束：关 SSE + 状态置为已结束（同 renderSubagents 的处理）
@@ -1729,14 +1933,14 @@ async function renderTasks() {
       }
     }
   }
-  el.innerHTML = r.tasks.map(t => {
+  setHtml(el, r.tasks.map(t => {
     const isActive = currentTaskDetail === t.task_id;
     const verifyingBadge = t.status === 'verifying'
       ? '<span class="verify-badge">⚠ 待验收</span>'
       : '';
     const verifyCount = (t.verify_history && t.verify_history.length) || 0;
     return `
-      <div class="task-item ${isActive ? 'active' : ''} ${t.status === 'verifying' ? 'task-verify' : ''}" data-tid="${escapeHtml(t.task_id)}" onclick="toggleTaskDetail('${escapeHtml(t.task_id)}')">
+      <div class="task-item ${isActive ? 'active' : ''} ${t.status === 'verifying' ? 'task-verify' : ''}" id="tk-${escapeHtml(t.task_id)}" data-tid="${escapeHtml(t.task_id)}" onclick="toggleTaskDetail('${escapeHtml(t.task_id)}')">
         <div class="row1">
           <span class="title" title="${escapeHtml(t.payload || '')}">${escapeHtml(makeTaskTitle(t.from_model, t.created_at, t.payload))}</span>
           <span class="task-status ${escapeHtml(t.status)}">${escapeHtml(t.status)}</span>
@@ -1758,7 +1962,7 @@ async function renderTasks() {
         ${t.error ? `<div class="muted" style="color: var(--err); margin-top: 4px">错误: ${escapeHtml(t.error)}</div>` : ''}
       </div>
     `;
-  }).join('');
+  }).join(''));
 }
 
 async function toggleTaskDetail(tid) {
@@ -1959,6 +2163,391 @@ async function submitVerify(tid, passed) {
   }
 }
 
+// ---------- 监督 / 任务组 ----------
+
+let currentCrewId = null;
+let currentCrewMemberId = null;
+let crewBusy = false;
+
+async function renderCrew() {
+  if (crewBusy) return;
+  const d = await fetchJson('/api/crews');
+  const list = document.getElementById('crew-list');
+  const crews = d.crews || [];
+  document.getElementById('crew-count').textContent = crews.length;
+  setHtml(list, crews.map(c => {
+    const sel = c.crew_id === currentCrewId ? ' selected' : '';
+    const warn = (c.n_stuck || c.n_off_track)
+      ? `<span class="badge" style="background:var(--err)">${c.n_stuck ? '卡死'+c.n_stuck : ''}${c.n_off_track ? ' 走歪'+c.n_off_track : ''}</span>`
+      : '';
+    return `<div class="runtime-item${sel}" id="crew-li-${escapeHtml(c.crew_id)}" onclick="selectCrew('${escapeHtml(c.crew_id)}')" style="cursor:pointer">
+      <span class="dot ${c.n_stuck ? 'red' : (c.n_running ? 'green' : 'gray')}"></span>
+      <div style="flex:1;min-width:0">
+        <div>${escapeHtml((c.goal || '').slice(0, 80))}</div>
+        <div class="muted" style="font-size:11px">${c.n_members || 0} 人 · 在跑 ${c.n_running || 0} ${warn}</div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="muted">还没有任务组</div>');
+  if (currentCrewId) await renderCrewDetail(currentCrewId);
+}
+
+async function selectCrew(id) {
+  currentCrewId = id;
+  currentCrewMemberId = null;
+  document.querySelectorAll('#crew-list .runtime-item').forEach(el => {
+    el.classList.toggle('selected', el.id === 'crew-li-' + id);
+  });
+  await renderCrewDetail(id);
+}
+
+function activeCrewStage() {
+  if (currentTab === 'cluster') return document.querySelector('#cluster-detail .crew-stage');
+  return document.querySelector('#crew-detail .crew-stage');
+}
+
+function selectCrewMember(crewId, memberId) {
+  currentCrewId = crewId;
+  currentCrewMemberId = memberId;
+  const stage = activeCrewStage();
+  if (stage) {
+    stage.querySelectorAll('.crew-node').forEach(n => {
+      n.classList.toggle('is-sel', n.dataset.mid === memberId);
+    });
+  }
+  loadCrewPreview(crewId, memberId, stage);
+}
+
+function crewRelationHtml(c, opts) {
+  const includeForm = !opts || opts.includeForm !== false;
+  const pfx = (opts && opts.pfx) || 'sv';
+  const members = c.members || [];
+  const board = c.blackboard || [];
+  const svg = crewGraphSvg(c, pfx);
+  const memberCards = members.map(m => {
+    const tags = [];
+    if (m.stuck) tags.push('<span class="stuck-badge">卡死</span>');
+    if (m.off_track) tags.push('<span style="color:var(--err)">走歪</span>');
+    if (m.status === 'running' && m.alive) tags.push('<span class="running-badge">在跑</span>');
+    const sel = m.member_id === currentCrewMemberId ? ' selected' : '';
+    return `<div class="connect-tool${sel}" id="${pfx}-mem-${escapeHtml(m.member_id)}" onclick="selectCrewMember('${escapeHtml(c.crew_id)}','${escapeHtml(m.member_id)}')" style="cursor:pointer">
+      <div><strong>${escapeHtml(m.role)}</strong> · ${escapeHtml(m.runtime)}/${escapeHtml(m.model)} ${tags.join(' ')}</div>
+      <div class="muted" style="font-size:11px">task ${escapeHtml(m.task_id || '')} · 空闲 ${m.idle_sec == null ? '-' : m.idle_sec + 's'} · ${escapeHtml(m.stuck_reason || '')}</div>
+      <div class="muted" style="font-size:11px">${escapeHtml((m.task || m.summary || '').slice(0, 160))}</div>
+      <div class="connect-actions" style="margin-top:6px" onclick="event.stopPropagation()">
+        <button class="btn-primary" onclick="crewSupervise('${escapeHtml(c.crew_id)}','${escapeHtml(m.member_id)}','unstick')">解卡</button>
+        <button class="btn" onclick="crewSupervise('${escapeHtml(c.crew_id)}','${escapeHtml(m.member_id)}','correct')">纠正</button>
+        <button class="btn" onclick="crewSupervise('${escapeHtml(c.crew_id)}','${escapeHtml(m.member_id)}','flag_off_track')">标走歪</button>
+        <button class="btn danger-btn" onclick="crewSupervise('${escapeHtml(c.crew_id)}','${escapeHtml(m.member_id)}','kill')">停止</button>
+      </div>
+    </div>`;
+  }).join('') || '<p class="muted">还没有成员。加人后会出现在关系图上。</p>';
+  const boardHtml = board.slice(-20).map(b =>
+    `<div class="crew-board-item"><span class="who">${escapeHtml(b.from)}</span>${b.to ? ' → ' + escapeHtml(b.to) : ' → 全员'} · ${escapeHtml(b.kind)} · ${escapeHtml((b.text || '').slice(0, 240))}</div>`
+  ).join('');
+  return `
+    <div class="crew-stage" id="${pfx}-stage" data-crew="${escapeHtml(c.crew_id)}">
+      <p class="crew-goal-banner"><strong>共同目标</strong> ${escapeHtml(c.goal || '')}</p>
+      <div class="crew-graph-wrap">${svg}</div>
+      <p class="crew-legend">
+        <span><i class="lg-run"></i>在跑</span>
+        <span><i class="lg-stuck"></i>卡死</span>
+        <span><i class="lg-off"></i>走歪</span>
+        <span><i class="lg-board"></i>黑板留言 / 监督动作</span>
+        <span class="muted">点节点看任务和思考</span>
+      </p>
+      <div class="crew-preview">
+        <div class="crew-preview-pane">
+          <h4>任务</h4>
+          <div class="crew-preview-body js-keep crew-preview-task muted">点图上一个成员</div>
+        </div>
+        <div class="crew-preview-pane">
+          <h4>思考</h4>
+          <div class="crew-preview-body js-keep crew-preview-think muted">点图上一个成员</div>
+        </div>
+        <div class="crew-preview-pane">
+          <h4>最近输出</h4>
+          <div class="crew-preview-body js-keep crew-preview-out muted">点图上一个成员</div>
+        </div>
+      </div>
+      <h3 style="margin-top:12px">成员</h3>
+      ${memberCards}
+      ${includeForm ? `<div class="card" style="margin-top:12px">
+        <h3>加人</h3>
+        <label class="form-label">角色</label>
+        <input id="${pfx}-role" class="form-input crew-role" placeholder="例如 implementer / reviewer">
+        <label class="form-label">分工</label>
+        <textarea id="${pfx}-task" class="form-input crew-task" rows="3" placeholder="这个成员具体做什么"></textarea>
+        <label class="form-label">runtime / model</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <input id="${pfx}-runtime" class="form-input crew-runtime" placeholder="已连接的 runtime，如 opencode">
+          <input id="${pfx}-model" class="form-input crew-model" placeholder="该 runtime 下的模型名，用户自定">
+        </div>
+        <button type="button" class="btn-primary crew-add-btn" style="margin-top:8px">加入并开工</button>
+        <span class="muted crew-add-status"></span>
+      </div>` : ''}
+      <h3 style="margin-top:12px">黑板（谁对谁说了什么）</h3>
+      ${boardHtml || '<p class="muted">空</p>'}
+      <textarea id="${pfx}-note" class="form-input crew-note" rows="2" placeholder="监督者留言"></textarea>
+      <button type="button" class="btn crew-note-btn" style="margin-top:6px">写到黑板</button>
+    </div>
+  `;
+}
+
+function crewGraphSvg(c, pfx) {
+  pfx = pfx || 'sv';
+  const members = c.members || [];
+  const W = 720, H = 300;
+  const cx = W / 2, cy = 168, R = 108;
+  const n = members.length;
+  const pos = { supervisor: { x: 110, y: 46 }, board: { x: cx, y: 46 } };
+  members.forEach((m, i) => {
+    const a = Math.PI * (0.15 + 0.7 * (n === 1 ? 0.5 : i / Math.max(n - 1, 1)));
+    pos[m.role] = {
+      x: cx + Math.cos(a) * (R + 70),
+      y: cy + Math.sin(a) * R,
+      mid: m.member_id,
+      m,
+    };
+  });
+  const node = (key, label, sub, cls, mid) => {
+    const p = pos[key];
+    if (!p) return '';
+    const sel = mid && mid === currentCrewMemberId ? ' is-sel' : '';
+    const x = p.x - 70, y = p.y - 22;
+    return `<g class="crew-node ${cls}${sel}" id="${pfx}-n-${escapeHtml(mid || key)}" data-key="${escapeHtml(key)}" data-mid="${escapeHtml(mid || '')}" transform="translate(${x},${y})">
+      <rect width="140" height="44"></rect>
+      <text x="10" y="18">${escapeHtml(label.slice(0, 16))}</text>
+      <text class="crew-node-sub" x="10" y="34">${escapeHtml((sub || '').slice(0, 22))}</text>
+    </g>`;
+  };
+  const edges = [];
+  const lastSeq = Math.max(0, ...((c.blackboard || []).map(b => b.seq || 0)));
+  (c.blackboard || []).slice(-24).forEach(b => {
+    const fromKey = b.from === 'system' ? 'board' : (pos[b.from] ? b.from : (b.from === 'supervisor' ? 'supervisor' : 'board'));
+    let toKey = 'board';
+    if (b.to && pos[b.to]) toKey = b.to;
+    else if (!b.to && fromKey !== 'board') toKey = 'board';
+    const a = pos[fromKey], t = pos[toKey];
+    if (!a || !t || fromKey === toKey) return;
+    const kind = b.kind || 'note';
+    const cls = kind === 'supervise' ? 'is-supervise' : (kind === 'flag' ? 'is-flag' : '');
+    const latest = b.seq === lastSeq ? ' is-latest' : '';
+    const x1 = a.x, y1 = a.y, x2 = t.x, y2 = t.y;
+    const mx = (x1 + x2) / 2 + (y1 > y2 ? 18 : -18);
+    const my = (y1 + y2) / 2;
+    edges.push(`<path class="crew-edge ${cls}${latest}" d="M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}" marker-end="url(#${pfx}-arrow)"/>`);
+  });
+  const memberNodes = members.map(m => {
+    let cls = 'is-run';
+    if (m.stuck) cls = 'is-stuck';
+    else if (m.off_track) cls = 'is-off';
+    else if (m.status !== 'running') cls = '';
+    const sub = m.stuck ? '卡死' : (m.off_track ? '走歪' : (m.status || ''));
+    return node(m.role, m.role, sub, cls, m.member_id);
+  }).join('');
+  return `<svg class="crew-graph" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="${pfx}-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6" fill="none" stroke="currentColor" />
+      </marker>
+    </defs>
+    ${edges.join('')}
+    ${node('supervisor', c.supervisor || '监督者', '解卡 / 纠偏', 'is-sup', '')}
+    ${node('board', '黑板', 'crew_post / poll', 'is-board', '')}
+    ${memberNodes}
+  </svg>`;
+}
+
+function bindCrewRelation(root, crewId) {
+  if (!root) return;
+  if (currentCrewMemberId) loadCrewPreview(crewId, currentCrewMemberId, root);
+  else {
+    const first = root.querySelector('.crew-node[data-mid]:not([data-mid=""])');
+    if (first && first.dataset.mid) selectCrewMember(crewId, first.dataset.mid);
+  }
+}
+
+async function loadCrewPreview(crewId, memberId, stage) {
+  stage = stage || activeCrewStage();
+  const taskEl = stage && stage.querySelector('.crew-preview-task');
+  const thinkEl = stage && stage.querySelector('.crew-preview-think');
+  const outEl = stage && stage.querySelector('.crew-preview-out');
+  if (!taskEl || !thinkEl) return;
+  try {
+    const d = await fetchJson(`/api/crews/${encodeURIComponent(crewId)}/members/${encodeURIComponent(memberId)}/preview`);
+    if (!d.ok) {
+      setHtml(taskEl, `<span class="muted">${escapeHtml(d.error || '没有预览')}</span>`);
+      setHtml(thinkEl, '');
+      if (outEl) setHtml(outEl, '');
+      return;
+    }
+    taskEl.classList.remove('muted');
+    thinkEl.classList.remove('muted');
+    if (outEl) outEl.classList.remove('muted');
+    setHtml(taskEl, `
+      <div class="crew-preview-meta">${escapeHtml(d.role || '')} · ${escapeHtml(d.runtime || '')}/${escapeHtml(d.model || '')}${d.live ? ' · 实时' : ''}</div>
+      <div class="crew-latest">${escapeHtml(d.task || '（没有单独存分工）')}</div>
+    `);
+    setHtml(thinkEl, d.thinking
+      ? `<div class="crew-thinking">${escapeHtml(d.thinking.slice(-1200))}</div>`
+      : '<div class="muted">还没有推理片段（有的 runtime 不单独上报 thinking）</div>');
+    if (outEl) {
+      const tools = (d.tools || []).length
+        ? `<div class="crew-tools">工具 ${d.tools.map(t => escapeHtml(t)).join(' · ')}</div>`
+        : '';
+      const latest = d.latest
+        ? `<div class="crew-latest">${escapeHtml(d.latest.slice(-900))}</div>`
+        : '<div class="muted">还没有输出</div>';
+      setHtml(outEl, latest + tools);
+    }
+  } catch (e) {
+    setHtml(thinkEl, `<span class="muted">${escapeHtml(e.message)}</span>`);
+  }
+}
+
+async function renderCrewDetail(id) {
+  const d = await fetchJson('/api/crews/' + encodeURIComponent(id));
+  const el = document.getElementById('crew-detail');
+  if (!d.ok) {
+    setHtml(el, `<p class="muted">${escapeHtml(d.error || '找不到')}</p>`);
+    return;
+  }
+  const c = d.crew;
+  if (currentCrewMemberId && !(c.members || []).some(m => m.member_id === currentCrewMemberId)) {
+    currentCrewMemberId = null;
+  }
+  setHtml(el, crewRelationHtml(c, { pfx: 'sv' }));
+  bindCrewRelation(el.querySelector('.crew-stage'), c.crew_id);
+}
+
+async function refreshCrewViews() {
+  if (currentTab === 'cluster') await renderCluster();
+  else await renderCrew();
+}
+
+async function crewAddMember(crewId) {
+  const stage = activeCrewStage();
+  if (!stage) return;
+  const role = (stage.querySelector('.crew-role') || {}).value;
+  const task = (stage.querySelector('.crew-task') || {}).value;
+  const runtime = (stage.querySelector('.crew-runtime') || {}).value;
+  const model = (stage.querySelector('.crew-model') || {}).value;
+  const st = stage.querySelector('.crew-add-status');
+  if (st) st.textContent = '开工中...';
+  crewBusy = true;
+  try {
+    const r = await fetch(`/api/crews/${encodeURIComponent(crewId)}/members`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, task, runtime, model }),
+    });
+    const d = await r.json();
+    if (st) st.textContent = d.ok ? '已加入 ' + (d.task_id || '') : (d.error || '失败');
+    if (!d.ok) alert(d.error || '失败');
+    currentCrewId = crewId;
+    await refreshCrewViews();
+  } finally {
+    crewBusy = false;
+  }
+}
+
+async function crewPost(crewId) {
+  const stage = activeCrewStage();
+  const note = stage && stage.querySelector('.crew-note');
+  const text = note ? note.value : '';
+  const r = await fetch(`/api/crews/${encodeURIComponent(crewId)}/post`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, from_role: 'supervisor', to: '' }),
+  });
+  const d = await r.json();
+  if (!d.ok) alert(d.error || '失败');
+  await refreshCrewViews();
+}
+
+async function crewSupervise(crewId, memberId, action) {
+  let instruction = '';
+  if (action === 'correct' || action === 'flag_off_track') {
+    instruction = prompt(action === 'correct' ? '纠正指令（成员会按这个改方向）' : '为什么走歪了？') || '';
+    if (action === 'correct' && !instruction.trim()) return;
+  }
+  crewBusy = true;
+  try {
+    const r = await fetch(`/api/crews/${encodeURIComponent(crewId)}/members/${encodeURIComponent(memberId)}/supervise`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, instruction }),
+    });
+    const d = await r.json();
+    if (!d.ok) alert(d.error || '失败');
+    currentCrewId = crewId;
+    currentCrewMemberId = memberId;
+    await refreshCrewViews();
+  } finally {
+    crewBusy = false;
+  }
+}
+
+document.getElementById('crew-create').addEventListener('click', async () => {
+  const goal = document.getElementById('crew-goal').value;
+  const st = document.getElementById('crew-create-status');
+  st.textContent = '创建中...';
+  const r = await fetch('/api/crews', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal, supervisor: '用户' }),
+  });
+  const d = await r.json();
+  if (!d.ok) {
+    st.textContent = d.error || '失败';
+    return;
+  }
+  st.textContent = '已创建';
+  currentCrewId = (d.crew || {}).crew_id;
+  document.getElementById('crew-goal').value = '';
+  await renderCrew();
+});
+
+// 事件委托：morph 会保留节点，不能在每次轮询后再 addEventListener（会叠一层）
+document.getElementById('subagent-list').addEventListener('click', (ev) => {
+  const item = ev.target.closest('.subagent-item');
+  if (!item) return;
+  currentSubagent = item.dataset.tid;
+  document.querySelectorAll('#subagent-list .subagent-item').forEach(e => e.classList.remove('active'));
+  item.classList.add('active');
+  showSubagentDetail(currentSubagent);
+});
+
+document.getElementById('dispatch-list').addEventListener('click', (ev) => {
+  const tidEl = ev.target.closest('.tid');
+  if (!tidEl || !tidEl.dataset.tid) return;
+  openSubagentFromDispatch(tidEl.dataset.tid);
+});
+
+document.getElementById('model-wall').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.card-submit');
+  if (!btn) return;
+  const card = btn.closest('.model-card');
+  if (card) submitFromCard(card);
+});
+
+function onCrewUi(ev) {
+  const t = ev.target;
+  if (ev.type === 'change' && t.classList && t.classList.contains('cluster-crew-pick')) {
+    currentCrewId = t.value;
+    currentCrewMemberId = null;
+    renderCluster();
+    return;
+  }
+  const add = t.closest && t.closest('.crew-add-btn');
+  const note = t.closest && t.closest('.crew-note-btn');
+  const node = t.closest && t.closest('.crew-node');
+  const stage = t.closest && t.closest('.crew-stage');
+  const crewId = (stage && stage.dataset.crew) || currentCrewId;
+  if (add) { ev.preventDefault(); crewAddMember(crewId); return; }
+  if (note) { ev.preventDefault(); crewPost(crewId); return; }
+  if (node && node.dataset.mid) selectCrewMember(crewId, node.dataset.mid);
+}
+document.getElementById('tab-crew').addEventListener('click', onCrewUi);
+document.getElementById('tab-cluster').addEventListener('click', onCrewUi);
+document.getElementById('tab-cluster').addEventListener('change', onCrewUi);
+
 // ---------- 启动 ----------
 
 // running 任务的已运行时长：每秒就地更新文本节点，不用整表重渲染
@@ -1971,4 +2560,7 @@ setInterval(() => {
 }, 1000);
 
 refresh();
-startPoll();
+if (autoRefresh) startLive();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && autoRefresh) refresh(true);
+});

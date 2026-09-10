@@ -33,7 +33,7 @@ _MODEL_ROUTES: dict[str, Any] = {
             "models": {
                 "quality": ("codex", "gpt-5.6-sol"),
                 "balanced": ("codex", "gpt-5.6-sol"),
-                "fast": ("opencode", "opencode-go/deepseek-v4-flash"),
+                "fast": ("opencode", "deepseek/deepseek-v4-flash"),
             },
         },
         "vision": {
@@ -59,7 +59,7 @@ _MODEL_ROUTES: dict[str, Any] = {
             "reason": "官方 API 的 deepseek-v4-pro 正式版（thinking）最强；Go 套餐作 fallback；free 只在极小任务用",
             "models": {
                 "quality": ("opencode", "deepseek/deepseek-v4-pro"),
-                "balanced": ("opencode", "opencode-go/deepseek-v4-flash"),
+                "balanced": ("opencode", "deepseek/deepseek-v4-flash"),
                 "fast": ("opencode", "opencode/deepseek-v4-flash-free"),
             },
         },
@@ -110,20 +110,19 @@ _ROUTER_SYSTEM = "你是 MCP Hub 的模型路由专家。你的唯一职责是�
 
 _ROUTER_USER = """请从以下 runtime 中为任务选择最合适的 runtime + model：
 
-- antigravity: gemini-3.6-flash-high / gemini-3.6-flash-medium / gemini-3.6-flash-low （Google Gemini，速度快，原生多模态，适合 coding/看图/快速问答）
-- codex: gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna （OpenAI Codex，gpt-5.6-sol 推理极强，适合复杂算法/架构/兜底）
-- claude: opus / sonnet / haiku / botcf-claude/claude-opus-5 / botcf-claude/claude-opus-4-6 / botcf-claude/claude-fable-5 （Claude Code；botcf-claude 需 `😡Claude-Max` 分组 key，baseURL `https://botcf.com`）
-- opencode: deepseek/deepseek-v4-pro / opencode-go/deepseek-v4-pro / opencode-go/deepseek-v4-flash / opencode/deepseek-v4-flash-free / qwen/qwen3.7-plus （deepseek/deepseek-v4-pro 是官方 API 正式版，thinking，质量优先；Go 套餐作 fallback；free 只用于明确的“免费/批量/兜底”任务）
-- qoder: Qwen3.8-Max-Preview / Qwen3.7-Max / Qwen3.7-Plus / DeepSeek-V4-Pro / DeepSeek-V4-Flash / GLM-5.2 / Kimi-K2.7-Code / MiniMax-M2.7 （Qoder CN CLI）
-- kimi: kimi-code/kimi-for-coding / kimi-code/kimi-for-coding-highspeed （Kimi Code，中文和长文本强）
+- antigravity: 本机 Gemini CLI 已登录的模型（适合 coding / 看图 / 快速问答）
+- codex: 本机 Codex CLI 已登录的模型（适合复杂算法 / 兜底）
+- claude: 本机 Claude Code CLI 已登录的模型
+- opencode: 本机 OpenCode 已配置的 provider/model（deepseek/* 等）
+- qoder / kimi / 其它：仅当该 runtime 已在仪表盘连接且 CLI 可用
 
 选择规则：
-1. coding 任务优先 Gemini Flash（antigravity）。
-2. 复杂推理/复杂代码/兜底优先 gpt-5.6-sol（codex）。
-3. 提到 deepseek/ds/深度求索 的任务优先 deepseek/deepseek-v4-pro（官方），其次 opencode-go/deepseek-v4-*，不要用 free，除非任务明确说“免费/批量/兜底”。
-4. 中文长文本/总结/翻译优先 kimi。
-5. 图像/视频/截图优先 Gemini。
-6. fast 档也在高质量模型里选，不要用 free 凑数。
+1. 只选列表里真实存在的 runtime + model，不要编造个人中转或号池名。
+2. coding 任务优先已连接的 antigravity 或 opencode。
+3. 复杂推理优先 codex 或 claude。
+4. 提到 deepseek 时优先 deepseek/deepseek-v4-pro，其次 deepseek/deepseek-v4-flash。
+5. 中文长文本优先 kimi。
+6. 图像/视频优先 Gemini。
 
 任务：{task}
 优先级：{priority}

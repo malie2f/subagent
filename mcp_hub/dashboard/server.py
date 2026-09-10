@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Flask 是可选依赖（dashboard 才用，mcp-hub 核心不依赖）
 try:
-    from flask import Flask, jsonify, request, Response, send_from_directory
+    from flask import Flask, jsonify, request, Response, send_from_directory, stream_with_context
 except ImportError:
     Flask = None  # type: ignore[assignment]
 
@@ -62,10 +62,27 @@ def create_app() -> "Flask":
         """token / cost 用量聚合（按模型、按天）。"""
         return jsonify(state.usage())
 
-    @app.route("/api/risk")
-    def api_risk():
-        """调用热力图（近 24h × model）+ 账号风控表。"""
-        return jsonify(state.risk_board())
+    @app.route("/api/connections")
+    def api_connections():
+        return jsonify(state.connections())
+
+    @app.route("/api/connections/runtimes/<name>/connect", methods=["POST"])
+    def api_connect_runtime(name: str):
+        data = request.get_json(silent=True) or {}
+        return jsonify(state.connect_runtime(name, open_login=bool(data.get("open_login"))))
+
+    @app.route("/api/connections/runtimes/<name>/disconnect", methods=["POST"])
+    def api_disconnect_runtime(name: str):
+        return jsonify(state.disconnect_runtime(name))
+
+    @app.route("/api/connections/tools/<name>/connect", methods=["POST"])
+    def api_connect_tool(name: str):
+        data = request.get_json(silent=True) or {}
+        return jsonify(state.connect_tool(name, data))
+
+    @app.route("/api/connections/tools/<name>/disconnect", methods=["POST"])
+    def api_disconnect_tool(name: str):
+        return jsonify(state.disconnect_tool(name))
 
     @app.route("/api/subagents")
     def api_subagents():
@@ -112,6 +129,55 @@ def create_app() -> "Flask":
         """读用户手动干预消息列表。"""
         return jsonify(state.get_user_messages(task_id))
 
+    @app.route("/api/crews")
+    def api_crews():
+        include_done = request.args.get("include_done", "false").lower() == "true"
+        return jsonify(state.crews(include_done=include_done))
+
+    @app.route("/api/crews", methods=["POST"])
+    def api_crew_create():
+        data = request.get_json(silent=True) or {}
+        return jsonify(state.crew_create(data.get("goal") or "", data.get("supervisor") or "用户"))
+
+    @app.route("/api/crews/<crew_id>")
+    def api_crew(crew_id: str):
+        return jsonify(state.crew(crew_id))
+
+    @app.route("/api/crews/<crew_id>/members/<member_id>/preview")
+    def api_crew_member_preview(crew_id: str, member_id: str):
+        return jsonify(state.crew_member_preview(crew_id, member_id))
+
+    @app.route("/api/crews/<crew_id>/members", methods=["POST"])
+    def api_crew_add_member(crew_id: str):
+        data = request.get_json(silent=True) or {}
+        return jsonify(state.crew_add_member_local(
+            crew_id,
+            role=data.get("role") or "",
+            task=data.get("task") or "",
+            runtime=data.get("runtime") or "",
+            model=data.get("model") or "",
+            workdir=data.get("workdir") or ".",
+        ))
+
+    @app.route("/api/crews/<crew_id>/post", methods=["POST"])
+    def api_crew_post(crew_id: str):
+        data = request.get_json(silent=True) or {}
+        return jsonify(state.crew_post(
+            crew_id,
+            data.get("text") or "",
+            data.get("from_role") or "supervisor",
+            data.get("to") or "",
+        ))
+
+    @app.route("/api/crews/<crew_id>/members/<member_id>/supervise", methods=["POST"])
+    def api_crew_supervise(crew_id: str, member_id: str):
+        data = request.get_json(silent=True) or {}
+        return jsonify(state.crew_supervise_local(
+            crew_id, member_id,
+            action=data.get("action") or "",
+            instruction=data.get("instruction") or "",
+        ))
+
     @app.route("/api/subagents/<task_id>/continue", methods=["POST"])
     def api_subagent_continue(task_id: str):
         """用用户消息续跑任务（spawn 新的子 agent）。"""
@@ -124,6 +190,19 @@ def create_app() -> "Flask":
     def api_subagent_cancel(task_id: str):
         """停止运行中的子 agent（按 registry 里的 pid 杀进程）。"""
         return jsonify(state.cancel_subagent(task_id))
+
+    @app.route("/api/events")
+    def api_events():
+        """看板状态 SSE：文件有变才推 dirty。点按钮仍走普通 POST。"""
+        return Response(
+            stream_with_context(state.events_sse()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     @app.route("/api/cluster")
     def api_cluster():
@@ -334,7 +413,10 @@ def main() -> None:
             sys.exit(1)
         app = create_app()
         print(f"mcp-hub dashboard: http://{args.host}:{args.port}")
-        app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)
+        app.run(
+            host=args.host, port=args.port, debug=args.debug,
+            use_reloader=False, threaded=True,
+        )
         return
 
     handler = {

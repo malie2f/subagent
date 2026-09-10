@@ -394,6 +394,22 @@ class RuntimeAdapter(abc.ABC):
 
     # ---- 通用工具 ----
 
+    def is_installed(self) -> bool:
+        """PATH 上能否找到二进制（未登录也可能为 True）。"""
+        return bool(
+            shutil.which(self.binary)
+            or shutil.which(self.binary + ".cmd")
+            or shutil.which(self.binary + ".exe")
+        )
+
+    def login_hint(self) -> str:
+        """给 dashboard 连接页看的登录说明。"""
+        return f"请先在本机完成 {self.binary} 的安装与登录，再回到仪表盘点击「连接」。"
+
+    def login_command(self) -> list[str] | None:
+        """可在可见控制台弹出的登录命令；未知则返回 None。"""
+        return None
+
     def info(self) -> dict[str, Any]:
         return {
             "name": self.name,
